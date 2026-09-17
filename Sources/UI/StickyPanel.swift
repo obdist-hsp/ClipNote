@@ -50,6 +50,12 @@ final class StickyPanel: NSPanel {
         persistFrame()
     }
 
+    /// 他アプリより手前に置き続けるか。OFF だと通常ウィンドウと同じ重なり順になる
+    func setKeepOnTop(_ on: Bool) {
+        isFloatingPanel = on
+        level = on ? .floating : .normal
+    }
+
     @objc private func persistFrame() {
         UserDefaults.standard.set(NSStringFromRect(frame), forKey: Self.frameKey)
     }
