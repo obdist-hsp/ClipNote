@@ -30,6 +30,21 @@ struct ClipItem: Identifiable, Equatable, Hashable {
             return "画像"
         }
     }
+
+    /// grapheme の `count` は巨大文字列でメインスレッドを止める。表示用は UTF-16 長。
+    var utf16Count: Int { text?.utf16.count ?? 0 }
+
+    func truncatedText(_ limit: Int = 400) -> String {
+        guard let t = text else { return "" }
+        if t.utf16.count <= limit { return t }
+        return String(t.prefix(limit)) + "…"
+    }
+
+    func truncatedOCR(_ limit: Int = 200) -> String {
+        guard let t = ocrText, !t.isEmpty else { return "" }
+        if t.utf16.count <= limit { return t }
+        return String(t.prefix(limit)) + "…"
+    }
 }
 
 /// 旧 JSON (history.json) の 1 レコード。SQLite 移行時にのみ使用

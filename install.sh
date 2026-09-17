@@ -3,7 +3,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 ./build.sh
-pkill -x ClipNote 2>/dev/null || true
+# メインスレッドが固まっていると SIGTERM（通常の終了）は届かない
+pkill -9 -x ClipNote 2>/dev/null || true
+pkill -9 -x ClipNoteStatus 2>/dev/null || true
 sleep 0.5
 rm -rf /Applications/ClipNote.app
 cp -R build/ClipNote.app /Applications/ClipNote.app

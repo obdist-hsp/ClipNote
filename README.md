@@ -1,12 +1,14 @@
 # ClipNote
 
+[![Beta](https://img.shields.io/badge/status-beta-orange.svg)](https://github.com/obdist-hsp/ClipNote/releases)
+[![Version 0.2.0](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/obdist-hsp/ClipNote/releases/tag/v0.2.0-beta)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black.svg)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-swiftc-F05138.svg)](https://www.swift.org/)
 
 Clipboard history + region capture, shown as always-on sticky notes in the macOS menu bar.
 macOS 14+ 向けのメニューバーアプリ。クリップボード履歴と範囲キャプチャを「付箋」として常時表示します。  
-Xcode 不要、`swiftc` だけでビルドでき、**外部通信ゼロを OS レベルで担保**しています。
+**いまはベータ版（v0.2.0）です。** Xcode 不要、`swiftc` だけでビルドでき、**外部通信ゼロを OS レベルで担保**しています。
 
 ## TARGET
 - 貸与されているPCで自由な環境が使えない
@@ -61,7 +63,7 @@ ad-hoc 署名のためビルドし直すと署名が変わり、許可をもう�
 | 右クリック | コピー / 拡大表示 / ブックマーク / 削除 / OCR テキストをコピー / Finder で表示 |
 | ブックマーク | 常に一覧の先頭に固定。左端のグリップ（≡）をドラッグで並び替え。容量上限の削除対象外 |
 | 検索欄 | 3 文字以上で本文と OCR 結果を全件対象に全文検索（SQLite FTS5 trigram） |
-| メニューバー | パネル表示切替、画面先頭に固定、⌘⇧2 ショートカット、監視の一時停止、全消去、ログイン時起動 |
+| メニューバー | 本体と別プロセス。パネル表示切替、画面先頭に固定、⌘⇧2、監視の一時停止、全消去、ログイン時起動、強制再起動。本体が固まってもメニューから強制再起動できる |
 
 - 一覧は 100 件ずつの無限スクロール
 - 画像は保存後にバックグラウンド（Vision、オンデバイス）で OCR され、結果が出た時点で自動的に検索対象になる。

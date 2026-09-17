@@ -1,28 +1,80 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import ImageIO
 
-/// 画像サムネイルのキャッシュ（縮小済み）
+/// 画像サムネイルのキャッシュ（縮小済み）。デコードはメインスレッドに載せない
 @MainActor
 final class ThumbnailCache {
     static let shared = ThumbnailCache()
     private let cache = NSCache<NSString, NSImage>()
-    init() { cache.countLimit = 200 }
+    private static let decodeQueue: OperationQueue = {
+        let q = OperationQueue()
+        q.name = "obdist.hsp.clipnote.thumb"
+        q.maxConcurrentOperationCount = 2
+        q.qualityOfService = .userInitiated
+        return q
+    }()
+    init() { cache.countLimit = 80 }
 
-    func thumbnail(for item: ClipItem, store: HistoryStore, maxWidth: CGFloat = 600) -> NSImage? {
+    func thumbnail(for item: ClipItem, store: HistoryStore, maxWidth: CGFloat = 360) async -> NSImage? {
         let key = item.id.uuidString as NSString
         if let c = cache.object(forKey: key) { return c }
-        guard let full = store.loadImage(for: item) else { return nil }
-        let px = full.pixelSize
-        let scale = min(1, maxWidth / max(px.width, 1))
-        let size = NSSize(width: px.width * scale, height: px.height * scale)
-        let thumb = NSImage(size: size, flipped: false) { rect in
-            full.draw(in: rect, from: .zero, operation: .copy, fraction: 1)
-            return true
+        guard let url = store.imageURL(for: item) else { return nil }
+        let maxPixel = Int(maxWidth)
+        let thumb: NSImage? = await withCheckedContinuation { continuation in
+            Self.decodeQueue.addOperation {
+                continuation.resume(returning: Self.makeThumbnail(url: url, maxPixel: maxPixel))
+            }
         }
-        cache.setObject(thumb, forKey: key)
+        if let thumb { cache.setObject(thumb, forKey: key) }
         return thumb
     }
+
+    nonisolated private static func makeThumbnail(url: URL, maxPixel: Int) -> NSImage? {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: false,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+    }
+
     func remove(_ id: UUID) { cache.removeObject(forKey: id.uuidString as NSString) }
+}
+
+/// 一覧カード用。本体 PNG を View.body で読まない。高さ予約で LazyVStack が全部測らないようにする
+private struct CardThumbnail: View {
+    let item: ClipItem
+    let store: HistoryStore
+    @State private var image: NSImage?
+
+    private var reservedHeight: CGFloat {
+        let maxH: CGFloat = 180
+        guard let w = item.imageWidth, let h = item.imageHeight, w > 0 else { return 80 }
+        return min(maxH, max(48, 240 * CGFloat(h) / CGFloat(w)))
+    }
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxHeight: 180)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            } else {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.primary.opacity(0.06))
+                    .frame(height: reservedHeight)
+            }
+        }
+        .task(id: item.id) {
+            image = await ThumbnailCache.shared.thumbnail(for: item, store: store)
+        }
+    }
 }
 
 struct ClipCardView: View {
@@ -75,9 +127,6 @@ struct ClipCardView: View {
             .frame(width: 14, height: 22)
             .contentShape(Rectangle())
             .help("ドラッグで並び替え")
-            .onHover { inside in
-                if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
-            }
     }
 
     private var copyButton: some View {
@@ -98,7 +147,7 @@ struct ClipCardView: View {
     @ViewBuilder private var content: some View {
         switch item.kind {
         case .text:
-            Text(item.text ?? "")
+            Text(item.truncatedText())
                 .font(.system(size: 12))
                 .lineLimit(4)
                 .truncationMode(.tail)
@@ -106,7 +155,7 @@ struct ClipCardView: View {
         case .file:
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: "doc.on.doc").foregroundStyle(.secondary)
-                Text((item.text ?? "").split(separator: "\n").map { ($0 as NSString).lastPathComponent }.joined(separator: "\n"))
+                Text(item.truncatedText(300).split(separator: "\n").prefix(3).map { ($0 as NSString).lastPathComponent }.joined(separator: "\n"))
                     .font(.system(size: 12)).lineLimit(3)
             }
         case .image:
@@ -117,7 +166,7 @@ struct ClipCardView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                         .padding(.top, 1)
-                    Text((item.ocrText ?? "").isEmpty ? "（文字なし）" : item.ocrText!)
+                    Text((item.ocrText ?? "").isEmpty ? "（文字なし）" : item.truncatedOCR())
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(4)
@@ -125,17 +174,9 @@ struct ClipCardView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
-                if let thumb = ThumbnailCache.shared.thumbnail(for: item, store: store) {
-                    Image(nsImage: thumb)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxHeight: 180)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                } else {
-                    Label("画像を読み込めません", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
-                }
+                CardThumbnail(item: item, store: store)
                 if let ocr = item.ocrText, !ocr.isEmpty {
-                    Text(ocr)
+                    Text(item.truncatedOCR(120))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -161,7 +202,7 @@ struct ClipCardView: View {
                     Label("OCR済", systemImage: "text.viewfinder")
                 }
             } else if item.kind == .text {
-                Text("\(item.text?.count ?? 0)字")
+                Text("\(item.utf16Count)字")
             }
             Spacer()
         }
@@ -201,9 +242,6 @@ struct ClipCardView: View {
                     completion(url, false, nil)
                     return nil
                 }
-            }
-            if let img = store.loadImage(for: item) {
-                provider.registerObject(img, visibility: .all)
             }
             if provider.registeredTypeIdentifiers.isEmpty {
                 if let t = item.ocrText, !t.isEmpty { return NSItemProvider(object: t as NSString) }

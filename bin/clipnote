@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# ClipNote — 引数なしで /Applications のリリース版を更新して起動
+#
+# 使い方:
+#   clipnote          ビルド → /Applications/ClipNote.app を更新 → 起動
+#   clipnote stop     終了
+#   clipnote status   稼働状況
+#   clipnote help
+
+set -euo pipefail
+
+_clipnote_script_dir() {
+  local src="${BASH_SOURCE[0]}"
+  while [[ -L "$src" ]]; do
+    local dir
+    dir="$(cd "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ "$src" != /* ]] && src="$dir/$src"
+  done
+  cd "$(dirname "$src")" && pwd
+}
+
+ROOT="$(cd "$(_clipnote_script_dir)/.." && pwd)"
+APP_NAME="ClipNote"
+INSTALL_PATH="/Applications/${APP_NAME}.app"
+
+print_status() {
+  echo "── ClipNote ──"
+  if pgrep -x "$APP_NAME" >/dev/null 2>&1; then
+    echo "  アプリ: 起動中 (PID $(pgrep -x "$APP_NAME" | tr '\n' ' '))"
+  else
+    echo "  アプリ: 停止中"
+  fi
+  if pgrep -x ClipNoteStatus >/dev/null 2>&1; then
+    echo "  メニュー: 起動中 (PID $(pgrep -x ClipNoteStatus | tr '\n' ' '))"
+  else
+    echo "  メニュー: 停止中"
+  fi
+  if [[ -d "$INSTALL_PATH" ]]; then
+    echo "  インストール: $INSTALL_PATH"
+  else
+    echo "  インストール: 未配置（clipnote で入れる）"
+  fi
+  echo "  プロジェクト: $ROOT"
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  ""|install|update)
+    exec "$ROOT/install.sh"
+    ;;
+  stop)
+    pkill -9 -x "$APP_NAME" 2>/dev/null || true
+    pkill -9 -x ClipNoteStatus 2>/dev/null || true
+    print_status
+    ;;
+  status)
+    print_status
+    ;;
+  help|-h|--help)
+    sed -n '2,8p' "$0" | sed -e 's/^# //' -e 's/^#//'
+    ;;
+  *)
+    echo "不明なコマンド: $cmd" >&2
+    echo "  clipnote / clipnote status / clipnote stop / clipnote help" >&2
+    exit 1
+    ;;
+esac
