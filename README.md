@@ -40,10 +40,10 @@ cd ClipNote
 ```
 
 ## 使い方
-インストール後、クリップボード監視は有効状態です。
-text      : cmd + c
-image     : ctrl + shift + cmd + 4　※MacOS標準のショートカット
-file(path): cmd + c
+インストール後、クリップボード監視は有効状態です。  
+text      : cmd + c  
+image     : ctrl + shift + cmd + 4　※MacOS標準のショートカット  
+file(path): cmd + c  
 
 ## 画面収録許可について
 ad-hoc 署名のためビルドし直すと署名が変わり、許可をもう一度求められます。
