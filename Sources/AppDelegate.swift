@@ -17,6 +17,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pauseMenuItem: NSMenuItem!
     private var panelMenuItem: NSMenuItem!
     private var loginMenuItem: NSMenuItem!
+    private var captureHotKeyMenuItem: NSMenuItem!
+
+    private static let captureHotKeyKey = "captureHotKeyEnabled"
+    private var captureHotKeyEnabled: Bool {
+        UserDefaults.standard.bool(forKey: Self.captureHotKeyKey)
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let icon = NSImage(named: "AppIcon") {
@@ -41,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.watcher.ignoreCurrentChange()
             },
             capture: { [weak self] in self?.startCapture() },
+            hidePanel: { [weak self] in self?.hidePanel() },
             preview: { [weak self] in self?.preview.show($0) }
         )
         preview = PreviewController(store: store, actions: actions)
@@ -54,9 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupStatusItem()
         watcher.start()
-        hotKey = HotKey(keyCode: UInt32(kVK_ANSI_2), modifiers: UInt32(cmdKey | shiftKey)) { [weak self] in
-            Task { @MainActor in self?.startCapture() }
-        }
+        applyCaptureHotKey()
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: panel, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.panelMenuItem.title = "パネルを表示" }
         }
@@ -105,9 +110,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         panelMenuItem = NSMenuItem(title: "パネルを隠す", action: #selector(togglePanel), keyEquivalent: "")
         menu.addItem(panelMenuItem)
-        let cap = NSMenuItem(title: "範囲キャプチャ", action: #selector(captureAction), keyEquivalent: "2")
-        cap.keyEquivalentModifierMask = [.command, .shift]
-        menu.addItem(cap)
+        menu.addItem(NSMenuItem(title: "範囲キャプチャ", action: #selector(captureAction), keyEquivalent: ""))
+        captureHotKeyMenuItem = NSMenuItem(title: "⌘⇧2 ショートカット", action: #selector(toggleCaptureHotKey), keyEquivalent: "")
+        captureHotKeyMenuItem.state = captureHotKeyEnabled ? .on : .off
+        menu.addItem(captureHotKeyMenuItem)
         pauseMenuItem = NSMenuItem(title: "クリップボード監視を一時停止", action: #selector(togglePause), keyEquivalent: "")
         menu.addItem(pauseMenuItem)
         menu.addItem(.separator())
@@ -126,14 +132,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func togglePanel() {
         if panel.isVisible {
-            panel.orderOut(nil)
-            panelMenuItem.title = "パネルを表示"
+            hidePanel()
         } else {
             showPanel()
         }
     }
 
+    private func hidePanel() {
+        panel.orderOut(nil)
+        panelMenuItem.title = "パネルを表示"
+    }
+
     @objc private func captureAction() { startCapture() }
+
+    @objc private func toggleCaptureHotKey() {
+        UserDefaults.standard.set(!captureHotKeyEnabled, forKey: Self.captureHotKeyKey)
+        captureHotKeyMenuItem.state = captureHotKeyEnabled ? .on : .off
+        applyCaptureHotKey()
+    }
+
+    private func applyCaptureHotKey() {
+        hotKey = nil
+        guard captureHotKeyEnabled else { return }
+        hotKey = HotKey(keyCode: UInt32(kVK_ANSI_2), modifiers: UInt32(cmdKey | shiftKey)) { [weak self] in
+            Task { @MainActor in self?.startCapture() }
+        }
+    }
 
     @objc private func togglePause() {
         watcher.setPaused(!watcher.paused)

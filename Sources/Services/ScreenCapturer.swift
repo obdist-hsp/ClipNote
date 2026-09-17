@@ -1,7 +1,7 @@
 import AppKit
 import ScreenCaptureKit
 
-/// ⌘⇧2 → 全ディスプレイに透明オーバーレイ → ドラッグで矩形選択 → ScreenCaptureKit で切り抜き
+/// 範囲キャプチャ → 全ディスプレイに透明オーバーレイ → ドラッグで矩形選択 → ScreenCaptureKit で切り抜き
 @MainActor
 final class ScreenCapturer {
     private var overlays: [SelectionOverlayWindow] = []
@@ -29,7 +29,7 @@ final class ScreenCapturer {
         CGRequestScreenCaptureAccess()
         let alert = NSAlert()
         alert.messageText = "画面収録の許可が必要です"
-        alert.informativeText = "システム設定 › プライバシーとセキュリティ › 画面収録 で ClipNote を許可してから、もう一度 ⌘⇧2 を押してください。"
+        alert.informativeText = "システム設定 › プライバシーとセキュリティ › 画面収録 で ClipNote を許可してから、もう一度キャプチャしてください。"
         alert.addButton(withTitle: "システム設定を開く")
         alert.addButton(withTitle: "閉じる")
         if alert.runModal() == .alertFirstButtonReturn,
