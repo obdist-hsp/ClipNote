@@ -87,44 +87,52 @@ struct HistoryTableView: NSViewRepresentable {
             lastFlashID = flashID
 
             if newKeys == oldKeys {
+                // 同じ行構成: 内容が変わった行と、高さが変わった行だけ
                 rows = newRows
                 guard !newRows.isEmpty else { return }
-                // 同じ行構成: 内容が変わった行と、高さが変わった行だけ
-                let width = rowWidth
-                var heightChanged = IndexSet()
-                var contentChanged = IndexSet()
-                for i in newRows.indices where newRows[i] != oldRows[i] {
-                    contentChanged.insert(i)
-                    if newRows[i].height(width: width) != oldRows[i].height(width: width) {
-                        heightChanged.insert(i)
-                    }
-                }
-                guard !contentChanged.isEmpty || flashChanged else { return }
                 withoutAnimation {
-                    if !heightChanged.isEmpty { table.noteHeightOfRows(withIndexesChanged: heightChanged) }
-                    refreshLiveCells { i, row in
-                        if contentChanged.contains(i) { return true }
-                        guard flashChanged, case .item(let r) = row else { return false }
-                        return r.id == self.flashID || r.id == oldFlash
-                    }
+                    applyContentChanges(oldRows: oldRows, newRows: newRows, lcp: newRows.count, lcs: 0, table: table)
+                    if flashChanged { refreshFlashRows(oldFlash: oldFlash) }
                 }
                 return
             }
-            let partial = applyStructuralChange(oldKeys: oldKeys, newRows: newRows, newKeys: newKeys, table: table)
+            let partial = applyStructuralChange(oldRows: oldRows, oldKeys: oldKeys, newRows: newRows, newKeys: newKeys, table: table)
             if partial, flashChanged {
-                withoutAnimation {
-                    refreshLiveCells { _, row in
-                        guard case .item(let r) = row else { return false }
-                        return r.id == self.flashID || r.id == oldFlash
-                    }
-                }
+                withoutAnimation { refreshFlashRows(oldFlash: oldFlash) }
+            }
+        }
+
+        /// 位置が対応する行（共通の接頭辞 lcp 行・接尾辞 lcs 行・任意の 1 組）を比べ、
+        /// 内容が変わった行は画面上のセルを差し替え、高さが変わった行は高さを再通知する
+        private func applyContentChanges(oldRows: [HistoryRow], newRows: [HistoryRow], lcp: Int, lcs: Int,
+                                         extra: (old: Int, new: Int)? = nil, table: NSTableView) {
+            let width = rowWidth
+            var content = IndexSet()
+            var height = IndexSet()
+            func compare(_ o: Int, _ n: Int) {
+                guard newRows[n] != oldRows[o] else { return }
+                content.insert(n)
+                if newRows[n].height(width: width) != oldRows[o].height(width: width) { height.insert(n) }
+            }
+            for i in 0..<lcp { compare(i, i) }
+            for k in 0..<lcs { compare(oldRows.count - 1 - k, newRows.count - 1 - k) }
+            if let extra { compare(extra.old, extra.new) }
+            if !height.isEmpty { table.noteHeightOfRows(withIndexesChanged: height) }
+            if !content.isEmpty { refreshLiveCells { i, _ in content.contains(i) } }
+        }
+
+        /// コピー時の flash（ON/OFF）は該当カードだけ差し替える。押したカードは見えているので在席セルで足りる
+        private func refreshFlashRows(oldFlash: UUID?) {
+            refreshLiveCells { _, row in
+                guard case .item(let r) = row else { return false }
+                return r.id == self.flashID || r.id == oldFlash
             }
         }
 
         /// 行の増減・移動。共通の接頭辞と接尾辞を除いた差分が「純挿入」「純削除」「1 要素の移動」なら部分更新、
         /// それ以外（セクション行の出現、検索語変更、空からの初回投入など）は reloadData。戻り値 = 部分更新で済んだか
         @discardableResult
-        private func applyStructuralChange(oldKeys: [RowKey], newRows: [HistoryRow], newKeys: [RowKey], table: NSTableView) -> Bool {
+        private func applyStructuralChange(oldRows: [HistoryRow], oldKeys: [RowKey], newRows: [HistoryRow], newKeys: [RowKey], table: NSTableView) -> Bool {
             let oldCount = oldKeys.count, newCount = newKeys.count
             var lcp = 0
             while lcp < oldCount && lcp < newCount && oldKeys[lcp] == newKeys[lcp] { lcp += 1 }
@@ -149,6 +157,8 @@ struct HistoryTableView: NSViewRepresentable {
                     table.insertRows(at: IndexSet(integersIn: lcp..<(lcp + inserted)), withAnimation: [])
                     table.endUpdates()
                     keep?(lcp, inserted)
+                    // 同じ更新内で内容だけ変わった行（容量超過で画像が消えた等）も反映する
+                    applyContentChanges(oldRows: oldRows, newRows: newRows, lcp: lcp, lcs: lcs, table: table)
                 }
                 return true
             }
@@ -159,6 +169,7 @@ struct HistoryTableView: NSViewRepresentable {
                     table.beginUpdates()
                     table.removeRows(at: IndexSet(integersIn: lcp..<(lcp + removed)), withAnimation: [])
                     table.endUpdates()
+                    applyContentChanges(oldRows: oldRows, newRows: newRows, lcp: lcp, lcs: lcs, table: table)
                 }
                 return true
             }
@@ -177,7 +188,9 @@ struct HistoryTableView: NSViewRepresentable {
                         table.beginUpdates()
                         table.moveRow(at: move.from, to: move.to)
                         table.endUpdates()
-                        refreshLiveCells { i, _ in i == move.to }   // createdAt など内容も変わっている
+                        // 移動した行は createdAt やブックマーク有無（画像の幅→高さ）も変わっている
+                        applyContentChanges(oldRows: oldRows, newRows: newRows, lcp: lcp, lcs: lcs,
+                                            extra: (old: move.from, new: move.to), table: table)
                     }
                     return true
                 }
@@ -200,7 +213,7 @@ struct HistoryTableView: NSViewRepresentable {
                 let end = start + count
                 let insertedHeight = end < table.numberOfRows
                     ? table.rect(ofRow: end).minY - first.minY
-                    : table.rect(ofRow: end - 1).maxY - first.minY + table.intercellSpacing.height
+                    : table.rect(ofRow: end - 1).maxY - first.minY
                 scroll.contentView.scroll(to: NSPoint(x: origin.x, y: origin.y + insertedHeight))
                 scroll.reflectScrolledClipView(scroll.contentView)
             }
