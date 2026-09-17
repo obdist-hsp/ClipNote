@@ -18,16 +18,16 @@ final class OCRQueue {
 
     init(store: HistoryStore) {
         self.store = store
-        cancellable = store.imageAdded.sink { [weak self] item in self?.enqueue(item) }
+        cancellable = store.imageAdded.sink { [weak self] row in self?.enqueue(row) }
         // 起動時: 未処理分を回収
         store.pendingOCR.forEach(enqueue)
     }
 
-    func enqueue(_ item: ClipItem) {
-        guard item.kind == .image, item.ocrText == nil, !inFlight.contains(item.id),
-              let url = store.imageURL(for: item) else { return }
-        inFlight.insert(item.id)
-        let id = item.id
+    func enqueue(_ row: ClipRow) {
+        guard row.kind == .image, !row.hasOCR, !inFlight.contains(row.id),
+              let url = store.imageURL(for: row) else { return }
+        inFlight.insert(row.id)
+        let id = row.id
         queue.addOperation { [weak self] in
             let text = Self.recognize(url: url)
             Task { @MainActor in

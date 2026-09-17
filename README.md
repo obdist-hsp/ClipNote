@@ -126,10 +126,25 @@ Sources/
   Services/HotKey.swift                Carbon グローバルホットキー
   Services/OCRQueue.swift              後追い OCR
   UI/StickyPanel.swift                 非アクティブ化しない浮動パネル
-  UI/HistoryListView.swift             検索、ブックマーク／履歴セクション、無限スクロール、並び替え
+  UI/HistoryListView.swift             検索欄、フッター、ブックマーク並び替えのドロップ処理
+  UI/HistoryTableView.swift            NSTableView による仮想化一覧（差分更新、100 件ずつの追加読み込み）
   UI/ClipCardView.swift                カード（コピーボタン、グリップ、右クリック）
   UI/PreviewWindow.swift               ダブルクリックの拡大プレビュー
 ```
+
+### 開発者向け: 大量データでの検証
+
+1000 件・10000 件規模での安定性（メモリ・スクロール・OCR 連続完了・リサイズ）を確認するための投入スクリプトを同梱している。
+ClipNote を一度起動してから終了し、次を実行する（実行中の ClipNote は終了しておくこと）。
+
+```bash
+bin/seed_demo.sh 1000  --images 200  --bookmarks 30  --huge 10 --pending-ocr 100   # 1000 件
+bin/seed_demo.sh 10000 --images 1500 --bookmarks 300 --huge 30 --pending-ocr 500   # 10000 件
+bin/seed_demo.sh --reset                                                            # 投入分だけ削除
+```
+
+`--huge` は 1 件あたり数十万文字のテキスト、`--pending-ocr` は起動直後に OCR が連続実行される未処理画像の数。
+画像は `Resources/AppIcon-1024.png` を縮小したものをハードリンクで並べるのでディスクは消費しない。
 
 ## ライセンス
 

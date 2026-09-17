@@ -38,12 +38,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             copy: { [weak self] in self?.copyToPasteboard($0) },
             toggleBookmark: { [weak self] in self?.store.toggleBookmark($0) },
             delete: { [weak self] in self?.store.delete($0) },
-            revealInFinder: { [weak self] item in
-                guard let url = self?.store.imageURL(for: item) else { return }
+            revealInFinder: { [weak self] row in
+                guard let url = self?.store.imageURL(for: row) else { return }
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             },
-            copyOCR: { [weak self] item in
-                guard let self, let t = item.ocrText, !t.isEmpty else { return }
+            copyOCR: { [weak self] row in
+                guard let self, let t = self.store.item(id: row.id)?.ocrText, !t.isEmpty else { return }
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(t, forType: .string)
                 self.watcher.ignoreCurrentChange()
@@ -215,7 +215,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func copyToPasteboard(_ item: ClipItem) {
+    /// 一覧行は本文の切り出ししか持たないので、ここで全文を取ってから書き込む
+    private func copyToPasteboard(_ row: ClipRow) {
+        guard let item = store.item(id: row.id) else { return }
         let pb = NSPasteboard.general
         pb.clearContents()
         switch item.kind {

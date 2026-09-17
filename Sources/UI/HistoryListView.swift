@@ -3,13 +3,13 @@ import UniformTypeIdentifiers
 
 /// パネルから呼ぶ操作
 struct ClipActions {
-    var copy: (ClipItem) -> Void
-    var toggleBookmark: (ClipItem) -> Void
-    var delete: (ClipItem) -> Void
-    var revealInFinder: (ClipItem) -> Void
-    var copyOCR: (ClipItem) -> Void
+    var copy: (ClipRow) -> Void
+    var toggleBookmark: (ClipRow) -> Void
+    var delete: (ClipRow) -> Void
+    var revealInFinder: (ClipRow) -> Void
+    var copyOCR: (ClipRow) -> Void
     var capture: () -> Void
-    var preview: (ClipItem) -> Void
+    var preview: (ClipRow) -> Void
 }
 
 struct HistoryListView: View {
@@ -23,7 +23,7 @@ struct HistoryListView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if store.visibleItems.isEmpty {
+            if store.isEmpty {
                 emptyState
             } else {
                 list
@@ -125,10 +125,10 @@ struct HistoryListView: View {
             .help("ドラッグでパネルを移動")
     }
 
-    private func flash(_ item: ClipItem) {
-        flashID = item.id
+    private func flash(_ row: ClipRow) {
+        flashID = row.id
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            if flashID == item.id { flashID = nil }
+            if flashID == row.id { flashID = nil }
         }
     }
 
@@ -140,7 +140,7 @@ struct HistoryListView: View {
 
 /// ブックマーク並び替え: グリップからのドラッグが他のブックマークカードに入った時点で入れ替える
 struct BookmarkDropDelegate: DropDelegate {
-    let target: ClipItem
+    let target: ClipRow
     let store: HistoryStore
     @Binding var dragging: UUID?
 
