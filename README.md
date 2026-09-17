@@ -43,7 +43,7 @@ ad-hoc 署名のためビルドし直すと署名が変わり、許可をもう�
 | 右クリック | コピー / 拡大表示 / ブックマーク / 削除 / OCR テキストをコピー / Finder で表示 |
 | ブックマーク | 常に一覧の先頭に固定。左端のグリップ（≡）をドラッグで並び替え。容量上限の削除対象外 |
 | 検索欄 | 3 文字以上で本文と OCR 結果を全件対象に全文検索（SQLite FTS5 trigram） |
-| メニューバー | パネル表示切替、監視の一時停止、旧履歴の取り込み、全消去、ログイン時起動 |
+| メニューバー | パネル表示切替、監視の一時停止、全消去、ログイン時起動 |
 
 - 一覧は 100 件ずつの無限スクロール。件数が増えても重くならない。
 - 画像は保存後にバックグラウンド（Vision、オンデバイス）で OCR され、結果が出た時点で自動的に検索対象になる。
@@ -54,11 +54,6 @@ ad-hoc 署名のためビルドし直すと署名が変わり、許可をもう�
   ```bash
   defaults write obdist.hsp.clipnote imageCapacityBytes -int 10737418240   # 10 GB
   ```
-
-## 旧 clip_logger.rb からの移行
-
-メニューバー →「旧履歴 (.clip_history.json) を読み込む…」→ `~/.clip_history.json` を選択。
-サンドボックス内のためファイル選択ダイアログ（Powerbox）経由でのみ読める。重複は自動で除外される。
 
 ## データの保存先
 
@@ -100,14 +95,14 @@ ad-hoc 署名のためビルドし直すと署名が変わり、許可をもう�
 
 ```
 build.sh                  ビルド・署名・検証
-ClipNote.entitlements     app-sandbox + user-selected.read-only のみ
+ClipNote.entitlements     app-sandbox のみ（network 権限なし）
 Info.plist                LSUIElement / 画面収録の用途説明
 Sources/
   main.swift, AppDelegate.swift        起動、メニューバー、各サービスの配線
   Models/ClipItem.swift                1 件のモデル
   Models/SQLite.swift                  libsqlite3 の最小ラッパー
   Models/Database.swift                スキーマ、FTS5、ページング、容量クエリ
-  Models/HistoryStore.swift            表示状態、ページ読み込み、ブックマーク、容量上限、旧履歴 import
+  Models/HistoryStore.swift            表示状態、ページ読み込み、ブックマーク、容量上限
   Services/PasteboardWatcher.swift     changeCount ポーリング
   Services/ScreenCapturer.swift        範囲選択オーバーレイ + ScreenCaptureKit
   Services/HotKey.swift                Carbon グローバルホットキー

@@ -333,27 +333,6 @@ final class HistoryStore: ObservableObject {
         try? FileManager.default.moveItem(at: json, to: baseDir.appendingPathComponent("history.json.migrated"))
     }
 
-    /// 旧 clip_logger.rb の履歴 ([String]) を取り込む。戻り値 = 取り込んだ件数
-    func importLegacy(from url: URL) throws -> Int {
-        let data = try Data(contentsOf: url)
-        let strings = try JSONDecoder().decode([String].self, from: data)
-        var added = 0
-        let base = Date().addingTimeInterval(-Double(strings.count))
-        try db.db.transaction {
-            for (i, s) in strings.enumerated() {
-                let hash = Self.sha256(Data(s.utf8))
-                if (try? db.item(hash: hash)) != nil { continue }
-                let it = ClipItem(rowid: 0, id: UUID(), kind: .text, text: s, imageFile: nil,
-                                  imageWidth: nil, imageHeight: nil, imageBytes: 0, imageDeleted: false,
-                                  ocrText: nil, contentHash: hash, createdAt: base.addingTimeInterval(Double(i)), bookmarkOrder: nil)
-                _ = try db.insert(it)
-                added += 1
-            }
-        }
-        reload()
-        return added
-    }
-
     // MARK: - Util
 
     static func sha256(_ data: Data) -> String {

@@ -24,6 +24,7 @@ mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp "$BIN" "$BUNDLE/Contents/MacOS/$APP"
 cp Info.plist "$BUNDLE/Contents/Info.plist"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$BUNDLE/Contents/Resources/"
+[ -f Resources/MenuBarIcon.png ] && cp Resources/MenuBarIcon.png "$BUNDLE/Contents/Resources/"
 echo -n 'APPL????' > "$BUNDLE/Contents/PkgInfo"
 
 echo "▶ codesign (ad-hoc, App Sandbox)"

@@ -17,11 +17,14 @@ final class StickyPanel: NSPanel {
         level = .floating
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = true
-        isMovableByWindowBackground = true
+        // カード上のドラッグをウィンドウ移動に奪われないようにする。
+        // パネル移動はタイトル相当の WindowDragRegion（performDrag）から行う。
+        isMovableByWindowBackground = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         minSize = NSSize(width: 220, height: 200)
         isReleasedWhenClosed = false
-        contentView = NSHostingView(rootView: content)
+        let hosting = FirstMouseHostingView(rootView: content)
+        contentView = hosting
 
         if let saved = UserDefaults.standard.string(forKey: Self.frameKey), !saved.isEmpty {
             setFrame(NSRectFromString(saved), display: false)
@@ -50,4 +53,26 @@ final class StickyPanel: NSPanel {
     @objc private func persistFrame() {
         UserDefaults.standard.set(NSStringFromRect(frame), forKey: Self.frameKey)
     }
+}
+
+/// この領域をドラッグすると所属ウィンドウを移動する。
+/// `isMovableByWindowBackground = false` のパネルで、タイトルバー相当の移動手段になる。
+struct WindowDragRegion: NSViewRepresentable {
+    func makeNSView(context: Context) -> WindowDragView { WindowDragView() }
+    func updateNSView(_ nsView: WindowDragView, context: Context) {}
+}
+
+final class WindowDragView: NSView {
+    override var mouseDownCanMoveWindow: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
+    }
+}
+
+/// 非アクティブな浮動パネルでも、最初のクリックでドラッグを開始できるようにする
+final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
 }
