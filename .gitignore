@@ -4,6 +4,8 @@ dist/
 *.swp
 *~
 .idea/
+.vscode/
+.cursor/
 xcuserdata/
 DerivedData/
 *.xcuserstate
