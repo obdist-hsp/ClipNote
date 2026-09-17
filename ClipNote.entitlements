@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- App Sandbox を有効化。network.client / network.server は意図的に付けない。
+       これによりカーネルがソケット作成を拒否し、外部通信が不可能になる。 -->
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+  <!-- 「旧履歴を読み込む…」の NSOpenPanel（Powerbox）でユーザーが選んだファイルのみ読める -->
+  <key>com.apple.security.files.user-selected.read-only</key>
+  <true/>
+</dict>
+</plist>

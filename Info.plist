@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>        <string>obdist.hsp.clipnote</string>
+  <key>CFBundleName</key>              <string>ClipNote</string>
+  <key>CFBundleDisplayName</key>       <string>ClipNote</string>
+  <key>CFBundleExecutable</key>        <string>ClipNote</string>
+  <key>CFBundlePackageType</key>       <string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleVersion</key>           <string>1</string>
+  <key>CFBundleIconFile</key>          <string>AppIcon</string>
+  <key>LSMinimumSystemVersion</key>    <string>14.0</string>
+  <key>LSUIElement</key>               <true/>
+  <key>NSHighResolutionCapable</key>   <true/>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>⌘⇧2 で画面の一部を切り抜いて付箋として保存するために画面収録を使用します。データは端末内にのみ保存されます。</string>
+</dict>
+</plist>
