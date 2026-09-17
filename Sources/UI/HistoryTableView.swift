@@ -9,7 +9,7 @@ struct HistoryTableView: NSViewRepresentable {
     let actions: ClipActions
     var flashID: UUID?
     @Binding var draggingBookmarkID: UUID?
-    let onCopied: (ClipItem) -> Void
+    let onCopied: (ClipRow) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -57,7 +57,7 @@ struct HistoryTableView: NSViewRepresentable {
         var actions: ClipActions!
         var flashID: UUID?
         var dragging: Binding<UUID?> = .constant(nil)
-        var onCopied: ((ClipItem) -> Void) = { _ in }
+        var onCopied: ((ClipRow) -> Void) = { _ in }
         weak var table: NSTableView?
         weak var scroll: NSScrollView?
         private var rows: [HistoryRow] = []
@@ -76,8 +76,8 @@ struct HistoryTableView: NSViewRepresentable {
         private static func snapshotKey(store: HistoryStore, flashID: UUID?) -> String {
             var s = flashID?.uuidString ?? "-"
             s += "|\(store.bookmarks.count)|\(store.page.count)|\(store.totalCount)|"
-            for b in store.bookmarks { s += b.id.uuidString; s += b.ocrText == nil ? "0" : "1" }
-            for p in store.page { s += p.id.uuidString; s += p.ocrText == nil ? "0" : "1" }
+            for b in store.bookmarks { s += b.id.uuidString; s += b.hasOCR ? "1" : "0" }
+            for p in store.page { s += p.id.uuidString; s += p.hasOCR ? "1" : "0" }
             return s
         }
 
@@ -129,7 +129,7 @@ struct HistoryTableView: NSViewRepresentable {
                     .onDrop(of: [UTType.plainText], delegate: BookmarkDropDelegate(
                         target: item, store: store, dragging: dragging))
                 )
-                prefetchIfNeeded(item)
+                prefetchIfNeeded(row: row)
                 return cell
             }
         }
@@ -139,11 +139,11 @@ struct HistoryTableView: NSViewRepresentable {
             table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<rows.count))
         }
 
-        private func prefetchIfNeeded(_ item: ClipItem) {
-            guard store.hasMore, let idx = store.page.firstIndex(where: { $0.id == item.id }) else { return }
-            guard idx >= store.page.count - 15 else { return }
+        /// 末尾 15 行に入ったら次ページ。行番号で判定し、ID の線形走査はしない
+        private func prefetchIfNeeded(row: Int) {
+            guard store.hasMore, row >= rows.count - 15 else { return }
             DispatchQueue.main.async { [weak self] in
-                self?.store.loadMoreIfNeeded(current: item)
+                self?.store.loadMore()
             }
         }
     }
@@ -151,7 +151,7 @@ struct HistoryTableView: NSViewRepresentable {
 
 private enum HistoryRow: Equatable {
     case section(String, String)
-    case item(ClipItem)
+    case item(ClipRow)
 
     @MainActor
     static func build(store: HistoryStore) -> [HistoryRow] {
@@ -174,7 +174,7 @@ private enum HistoryRow: Equatable {
         }
     }
 
-    static func itemHeight(_ item: ClipItem, width: CGFloat) -> CGFloat {
+    static func itemHeight(_ item: ClipRow, width: CGFloat) -> CGFloat {
         let vPad: CGFloat = 20
         let footer: CGFloat = 16
         let gap: CGFloat = 6
@@ -189,7 +189,7 @@ private enum HistoryRow: Equatable {
             if let w = item.imageWidth, let h = item.imageHeight, w > 0 {
                 imgH = min(maxH, max(48, inner * CGFloat(h) / CGFloat(w)))
             }
-            let ocr: CGFloat = (item.ocrText?.isEmpty == false) ? 22 : 0
+            let ocr: CGFloat = item.hasNonEmptyOCR ? 22 : 0
             return vPad + gap + footer + imgH + (ocr > 0 ? gap + ocr : 0)
         }
     }

@@ -2,12 +2,13 @@ import AppKit
 import SwiftUI
 import Combine
 
-/// ダブルクリックで開く拡大プレビュー。← → で前後、Esc で閉じる
+/// ダブルクリックで開く拡大プレビュー。← → で前後、Esc で閉じる。
+/// 前後移動は一覧の軽量行で行い、表示中の 1 件だけ全文を DB から取る（全件をコピーして抱えない）
 @MainActor
 final class PreviewController: ObservableObject {
-    @Published var items: [ClipItem] = []
-    @Published var index = 0
-    var current: ClipItem? { items.indices.contains(index) ? items[index] : nil }
+    @Published private(set) var rows: [ClipRow] = []
+    @Published private(set) var index = 0
+    @Published private(set) var current: ClipItem?
 
     private var window: PreviewWindow?
     private let store: HistoryStore
@@ -17,16 +18,17 @@ final class PreviewController: ObservableObject {
     init(store: HistoryStore, actions: ClipActions) {
         self.store = store
         self.actions = actions
-        cancellable = store.itemChanged.sink { [weak self] changed in
-            guard let self, let i = self.items.firstIndex(where: { $0.id == changed.id }) else { return }
-            self.items[i] = changed
+        cancellable = store.itemChanged.sink { [weak self] id in
+            guard let self, id == self.current?.id else { return }
+            self.loadCurrent()
         }
     }
 
-    func show(_ item: ClipItem) {
-        items = store.visibleItems
-        index = items.firstIndex(where: { $0.id == item.id }) ?? 0
-        if items.isEmpty { items = [item]; index = 0 }
+    func show(_ row: ClipRow) {
+        rows = store.visibleRows
+        index = rows.firstIndex(where: { $0.id == row.id }) ?? 0
+        if rows.isEmpty { rows = [row]; index = 0 }
+        loadCurrent()
         if window == nil {
             let w = PreviewWindow(controller: self)
             w.contentView = NSHostingView(rootView: PreviewView(controller: self, store: store, actions: actions))
@@ -37,8 +39,13 @@ final class PreviewController: ObservableObject {
     }
 
     func close() { window?.orderOut(nil) }
-    func next() { if index + 1 < items.count { index += 1 } }
-    func prev() { if index > 0 { index -= 1 } }
+    func next() { if index + 1 < rows.count { index += 1; loadCurrent() } }
+    func prev() { if index > 0 { index -= 1; loadCurrent() } }
+
+    private func loadCurrent() {
+        guard rows.indices.contains(index) else { current = nil; return }
+        current = store.item(id: rows[index].id)
+    }
 }
 
 final class PreviewWindow: NSWindow {
@@ -103,22 +110,22 @@ struct PreviewView: View {
         HStack(spacing: 10) {
             Button { controller.prev() } label: { Image(systemName: "chevron.left") }
                 .disabled(controller.index == 0)
-            Text("\(controller.index + 1) / \(controller.items.count)")
+            Text("\(controller.index + 1) / \(controller.rows.count)")
                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             Button { controller.next() } label: { Image(systemName: "chevron.right") }
-                .disabled(controller.index + 1 >= controller.items.count)
+                .disabled(controller.index + 1 >= controller.rows.count)
             Spacer()
             if let item = controller.current {
-                Text(item.preview.isEmpty ? "" : item.kind == .image ? item.preview : "\(item.text?.count ?? 0) 字")
+                Text(item.preview.isEmpty ? "" : item.kind == .image ? item.preview : "\(item.utf16Count) 字")
                     .font(.caption).foregroundStyle(.secondary)
                 Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.caption).foregroundStyle(.secondary)
-                Button { actions.toggleBookmark(item) } label: {
+                Button { actions.toggleBookmark(ClipRow(item)) } label: {
                     Image(systemName: item.isBookmarked ? "bookmark.fill" : "bookmark")
                         .foregroundStyle(item.isBookmarked ? .orange : .primary)
                 }
                 .help(item.isBookmarked ? "ブックマークを解除" : "ブックマークに追加")
-                Button { actions.copy(item) } label: { Label("コピー", systemImage: "doc.on.doc") }
+                Button { actions.copy(ClipRow(item)) } label: { Label("コピー", systemImage: "doc.on.doc") }
                     .keyboardShortcut("c", modifiers: .command)
             }
         }

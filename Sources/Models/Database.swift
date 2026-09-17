@@ -66,6 +66,36 @@ final class Database {
                  bookmarkOrder: r.isNull(12) ? nil : r.double(12))
     }
 
+    /// 一覧用の投影列。本文・OCR は先頭だけ切り出し、長さは別に取る。
+    /// SQLite は行全体をディスクから読むので節約されるのは Swift 側のヒープ（I/O ではない）。
+    /// JOIN で使うときは `prefix` に "i." などを渡す。
+    static func rowColumns(_ p: String = "") -> String {
+        """
+        \(p)rowid, \(p)id, \(p)kind, substr(\(p)text, 1, \(ClipRow.textPreviewLimit)), length(\(p)text), \
+        \(p)image_file, \(p)image_w, \(p)image_h, \(p)image_bytes, \(p)image_deleted, \
+        (\(p)ocr_text IS NOT NULL), substr(\(p)ocr_text, 1, \(ClipRow.ocrPreviewLimit)), length(\(p)ocr_text), \
+        \(p)created_at, \(p)bookmark_order
+        """
+    }
+
+    static func row(from r: SQLite.Row) -> ClipRow {
+        ClipRow(rowid: r.int64(0),
+                id: UUID(uuidString: r.string(1) ?? "") ?? UUID(),
+                kind: ClipKind(rawValue: r.string(2) ?? "text") ?? .text,
+                textPreview: r.string(3) ?? "",
+                textLength: r.int(4),
+                imageFile: r.string(5),
+                imageWidth: r.isNull(6) ? nil : r.int(6),
+                imageHeight: r.isNull(7) ? nil : r.int(7),
+                imageBytes: r.int(8),
+                imageDeleted: r.bool(9),
+                hasOCR: r.bool(10),
+                ocrPreview: r.string(11) ?? "",
+                ocrLength: r.int(12),
+                createdAt: r.date(13),
+                bookmarkOrder: r.isNull(14) ? nil : r.double(14))
+    }
+
     // MARK: - Insert / fetch
 
     func insert(_ it: ClipItem) throws -> Int64 {
@@ -85,42 +115,42 @@ final class Database {
         try db.scalar("SELECT \(Self.columns) FROM items WHERE id = ?", [id.uuidString], Self.item)
     }
 
-    /// 通常一覧（ブックマーク除外）: created_at のキーセットページング
-    func page(before: (Date, Int64)?, limit: Int) throws -> [ClipItem] {
-        var out: [ClipItem] = []
+    /// 通常一覧（ブックマーク除外）: created_at のキーセットページング。一覧用の軽量行で返す
+    func page(before: (Date, Int64)?, limit: Int) throws -> [ClipRow] {
+        var out: [ClipRow] = []
         if let (d, r) = before {
             try db.query("""
-            SELECT \(Self.columns) FROM items
+            SELECT \(Self.rowColumns()) FROM items
             WHERE bookmark_order IS NULL AND (created_at < ? OR (created_at = ? AND rowid < ?))
             ORDER BY created_at DESC, rowid DESC LIMIT ?
-            """, [d, d, r, limit]) { out.append(Self.item(from: $0)) }
+            """, [d, d, r, limit]) { out.append(Self.row(from: $0)) }
         } else {
             try db.query("""
-            SELECT \(Self.columns) FROM items WHERE bookmark_order IS NULL
+            SELECT \(Self.rowColumns()) FROM items WHERE bookmark_order IS NULL
             ORDER BY created_at DESC, rowid DESC LIMIT ?
-            """, [limit]) { out.append(Self.item(from: $0)) }
+            """, [limit]) { out.append(Self.row(from: $0)) }
         }
         return out
     }
 
     /// 検索（全件対象、ブックマーク含む）
-    func search(_ query: String, before: (Date, Int64)?, limit: Int) throws -> [ClipItem] {
-        var out: [ClipItem] = []
+    func search(_ query: String, before: (Date, Int64)?, limit: Int) throws -> [ClipRow] {
+        var out: [ClipRow] = []
         let match = Self.ftsQuery(query)
         if let (d, r) = before {
             try db.query("""
-            SELECT \(Self.columns.split(separator: ",").map { "i." + $0.trimmingCharacters(in: .whitespaces) }.joined(separator: ", "))
+            SELECT \(Self.rowColumns("i."))
             FROM items_fts f JOIN items i ON i.rowid = f.rowid
             WHERE items_fts MATCH ? AND (i.created_at < ? OR (i.created_at = ? AND i.rowid < ?))
             ORDER BY i.created_at DESC, i.rowid DESC LIMIT ?
-            """, [match, d, d, r, limit]) { out.append(Self.item(from: $0)) }
+            """, [match, d, d, r, limit]) { out.append(Self.row(from: $0)) }
         } else {
             try db.query("""
-            SELECT \(Self.columns.split(separator: ",").map { "i." + $0.trimmingCharacters(in: .whitespaces) }.joined(separator: ", "))
+            SELECT \(Self.rowColumns("i."))
             FROM items_fts f JOIN items i ON i.rowid = f.rowid
             WHERE items_fts MATCH ?
             ORDER BY i.created_at DESC, i.rowid DESC LIMIT ?
-            """, [match, limit]) { out.append(Self.item(from: $0)) }
+            """, [match, limit]) { out.append(Self.row(from: $0)) }
         }
         return out
     }
@@ -138,18 +168,18 @@ final class Database {
         try db.scalar("SELECT count(*) FROM items") { $0.int(0) } ?? 0
     }
 
-    func bookmarks() throws -> [ClipItem] {
-        var out: [ClipItem] = []
-        try db.query("SELECT \(Self.columns) FROM items WHERE bookmark_order IS NOT NULL ORDER BY bookmark_order, rowid") {
-            out.append(Self.item(from: $0))
+    func bookmarks() throws -> [ClipRow] {
+        var out: [ClipRow] = []
+        try db.query("SELECT \(Self.rowColumns()) FROM items WHERE bookmark_order IS NOT NULL ORDER BY bookmark_order, rowid") {
+            out.append(Self.row(from: $0))
         }
         return out
     }
 
-    func pendingOCR() throws -> [ClipItem] {
-        var out: [ClipItem] = []
-        try db.query("SELECT \(Self.columns) FROM items WHERE kind='image' AND ocr_text IS NULL AND image_file IS NOT NULL ORDER BY created_at DESC") {
-            out.append(Self.item(from: $0))
+    func pendingOCR() throws -> [ClipRow] {
+        var out: [ClipRow] = []
+        try db.query("SELECT \(Self.rowColumns()) FROM items WHERE kind='image' AND ocr_text IS NULL AND image_file IS NOT NULL ORDER BY created_at DESC") {
+            out.append(Self.row(from: $0))
         }
         return out
     }
@@ -204,13 +234,13 @@ final class Database {
     }
 
     /// 容量超過分を古い順に「画像だけ」削除する候補
-    func oldestImages(limit: Int) throws -> [ClipItem] {
-        var out: [ClipItem] = []
+    func oldestImages(limit: Int) throws -> [ClipRow] {
+        var out: [ClipRow] = []
         try db.query("""
-        SELECT \(Self.columns) FROM items
+        SELECT \(Self.rowColumns()) FROM items
         WHERE image_file IS NOT NULL AND bookmark_order IS NULL
         ORDER BY created_at ASC, rowid ASC LIMIT ?
-        """, [limit]) { out.append(Self.item(from: $0)) }
+        """, [limit]) { out.append(Self.row(from: $0)) }
         return out
     }
 

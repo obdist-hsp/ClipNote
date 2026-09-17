@@ -2,7 +2,7 @@ import AppKit
 import CryptoKit
 import Combine
 
-/// 履歴の保持・永続化（SQLite）。表示中のページだけをメモリに持つ。
+/// 履歴の保持・永続化（SQLite）。一覧には軽量な `ClipRow` だけを持ち、全文は必要なときに `item(id:)` で取る。
 @MainActor
 final class HistoryStore: ObservableObject {
     static let pageSize = 100
@@ -13,16 +13,17 @@ final class HistoryStore: ObservableObject {
         return v > 0 ? v : 100 * 1024 * 1024 * 1024
     }
 
-    // 表示状態
-    @Published private(set) var bookmarks: [ClipItem] = []
-    @Published private(set) var page: [ClipItem] = []       // 通常一覧 or 検索結果（100件ずつ増える）
+    // 表示状態（一覧用の軽量行。本文・OCR は先頭だけ）
+    @Published private(set) var bookmarks: [ClipRow] = []
+    @Published private(set) var page: [ClipRow] = []       // 通常一覧 or 検索結果（100件ずつ増える）
     @Published private(set) var hasMore = false
     @Published private(set) var totalCount = 0
     @Published private(set) var matchCount: Int? = nil     // 検索中のヒット数
     @Published private(set) var totalImageBytes = 0
     @Published private(set) var query = ""
     var isSearching: Bool { query.count >= Self.minQueryLength }
-    /// SwiftUI の onAppear が同一ターンで再入して全件を一気に読むのを防ぐ
+    var isEmpty: Bool { bookmarks.isEmpty && page.isEmpty }
+    /// 同一ターンで再入して全件を一気に読むのを防ぐ
     private var loadingMore = false
 
     let baseDir: URL
@@ -30,9 +31,9 @@ final class HistoryStore: ObservableObject {
     private let db: Database
 
     /// 画像 item が追加されたときの通知（OCRQueue が購読）
-    let imageAdded = PassthroughSubject<ClipItem, Never>()
-    /// レコードが更新されたとき（プレビュー等が追従）
-    let itemChanged = PassthroughSubject<ClipItem, Never>()
+    let imageAdded = PassthroughSubject<ClipRow, Never>()
+    /// レコードが更新されたとき（プレビュー等が必要なら取り直す）
+    let itemChanged = PassthroughSubject<UUID, Never>()
 
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -73,7 +74,7 @@ final class HistoryStore: ObservableObject {
 
     private func fetchNextPage() {
         let last = page.last.map { ($0.createdAt, $0.rowid) }
-        let next: [ClipItem]
+        let next: [ClipRow]
         if isSearching {
             next = (try? db.search(query, before: last, limit: Self.pageSize)) ?? []
         } else {
@@ -83,18 +84,19 @@ final class HistoryStore: ObservableObject {
         hasMore = next.count == Self.pageSize
     }
 
-    /// 末尾に近づいたら呼ぶ
-    func loadMoreIfNeeded(current item: ClipItem) {
-        guard hasMore, let idx = page.firstIndex(where: { $0.id == item.id }) else { return }
-        if idx >= page.count - 20 { loadMore() }
-    }
-
     func setQuery(_ q: String) {
         let trimmed = q.trimmingCharacters(in: .whitespaces)
         guard trimmed != query else { return }
         let wasSearching = isSearching
         query = trimmed
         if isSearching || wasSearching { reload() }
+    }
+
+    // MARK: - Full record access
+
+    /// 全文レコード。コピー・ドラッグ・プレビューなど、本文や OCR 全文が要るときだけ呼ぶ
+    func item(id: UUID) -> ClipItem? {
+        try? db.item(id: id)
     }
 
     // MARK: - Add
@@ -138,8 +140,9 @@ final class HistoryStore: ObservableObject {
                 try? db.touch(rowid: existing.rowid, date: now)
             }
             updated.createdAt = now
-            moveToTop(updated)
-            if updated.ocrText == nil { imageAdded.send(updated) }
+            let row = ClipRow(updated)
+            moveToTop(row)
+            if updated.ocrText == nil { imageAdded.send(row) }
             enforceCapacity()
             return updated
         }
@@ -153,8 +156,9 @@ final class HistoryStore: ObservableObject {
         guard let rowid = try? db.insert(item) else { return nil }
         item = withRowid(item, rowid)
         totalCount += 1
-        prependToPage(item)
-        imageAdded.send(item)
+        let row = ClipRow(item)
+        prependToPage(row)
+        imageAdded.send(row)
         enforceCapacity()
         return item
     }
@@ -163,13 +167,13 @@ final class HistoryStore: ObservableObject {
         if let existing = try? db.item(hash: item.contentHash) {
             try? db.touch(rowid: existing.rowid, date: item.createdAt)
             var u = existing; u.createdAt = item.createdAt
-            moveToTop(u)
+            moveToTop(ClipRow(u))
             return u
         }
         guard let rowid = try? db.insert(item) else { return nil }
         let saved = withRowid(item, rowid)
         totalCount += 1
-        prependToPage(saved)
+        prependToPage(ClipRow(saved))
         return saved
     }
 
@@ -180,50 +184,59 @@ final class HistoryStore: ObservableObject {
                  createdAt: item.createdAt, bookmarkOrder: item.bookmarkOrder)
     }
 
-    private func prependToPage(_ item: ClipItem) {
+    private func prependToPage(_ row: ClipRow) {
         guard !isSearching else { return }   // 検索中は次回 reload で反映
-        page.insert(item, at: 0)
+        page.insert(row, at: 0)
     }
 
-    private func moveToTop(_ item: ClipItem) {
-        if item.isBookmarked {
-            if let i = bookmarks.firstIndex(where: { $0.id == item.id }) { bookmarks[i] = item }
-            itemChanged.send(item)
+    private func moveToTop(_ row: ClipRow) {
+        if row.isBookmarked {
+            if let i = bookmarks.firstIndex(where: { $0.id == row.id }) { bookmarks[i] = row }
+            itemChanged.send(row.id)
             return
         }
-        page.removeAll { $0.id == item.id }
-        prependToPage(item)
-        itemChanged.send(item)
+        if isSearching {
+            // 検索結果の並びは変えず、内容だけ追従
+            if let i = page.firstIndex(where: { $0.id == row.id }) { page[i] = row }
+        } else {
+            page.removeAll { $0.id == row.id }
+            prependToPage(row)
+        }
+        itemChanged.send(row.id)
     }
 
     // MARK: - Mutations
 
     func updateOCR(id: UUID, text: String) {
         try? db.updateOCR(id: id, text: text)
-        replaceInMemory(id: id) { $0.ocrText = text }
+        replaceInMemory(id: id) {
+            $0.hasOCR = true
+            $0.ocrPreview = text.scalarPrefix(ClipRow.ocrPreviewLimit)
+            $0.ocrLength = text.scalarCount
+        }
     }
 
-    func toggleBookmark(_ item: ClipItem) {
-        if item.isBookmarked {
-            try? db.setBookmark(id: item.id, order: nil)
-            bookmarks.removeAll { $0.id == item.id }
-            var u = item; u.bookmarkOrder = nil
+    func toggleBookmark(_ row: ClipRow) {
+        if row.isBookmarked {
+            try? db.setBookmark(id: row.id, order: nil)
+            bookmarks.removeAll { $0.id == row.id }
+            var u = row; u.bookmarkOrder = nil
             // 通常一覧の適切な位置へ戻す（表示中の範囲にあれば挿入）
             if !isSearching {
                 if let idx = page.firstIndex(where: { $0.createdAt < u.createdAt }) { page.insert(u, at: idx) }
                 else if !hasMore { page.append(u) }
             } else {
-                replaceInMemory(id: item.id) { $0.bookmarkOrder = nil }
+                replaceInMemory(id: row.id) { $0.bookmarkOrder = nil }
             }
-            itemChanged.send(u)
+            itemChanged.send(u.id)
         } else {
             let order = ((try? db.maxBookmarkOrder()) ?? 0) + 1
-            try? db.setBookmark(id: item.id, order: order)
-            var u = item; u.bookmarkOrder = order
-            page.removeAll { $0.id == item.id && !isSearching }
-            if isSearching { replaceInMemory(id: item.id) { $0.bookmarkOrder = order } }
+            try? db.setBookmark(id: row.id, order: order)
+            var u = row; u.bookmarkOrder = order
+            page.removeAll { $0.id == row.id && !isSearching }
+            if isSearching { replaceInMemory(id: row.id) { $0.bookmarkOrder = order } }
             bookmarks.append(u)
-            itemChanged.send(u)
+            itemChanged.send(u.id)
         }
     }
 
@@ -249,15 +262,15 @@ final class HistoryStore: ObservableObject {
         try? db.setBookmarkOrders(pairs)
     }
 
-    func delete(_ item: ClipItem) {
-        try? db.delete(id: item.id)
-        deleteImageFile(item.imageFile)
-        ThumbnailCache.shared.remove(item.id)
-        bookmarks.removeAll { $0.id == item.id }
-        page.removeAll { $0.id == item.id }
+    func delete(_ row: ClipRow) {
+        try? db.delete(id: row.id)
+        deleteImageFile(row.imageFile)
+        ThumbnailCache.shared.remove(row.id)
+        bookmarks.removeAll { $0.id == row.id }
+        page.removeAll { $0.id == row.id }
         totalCount = max(0, totalCount - 1)
         if matchCount != nil { matchCount = max(0, (matchCount ?? 1) - 1) }
-        totalImageBytes = max(0, totalImageBytes - item.imageBytes)
+        totalImageBytes = max(0, totalImageBytes - row.imageBytes)
     }
 
     func clearAllNonBookmarked() {
@@ -266,9 +279,11 @@ final class HistoryStore: ObservableObject {
         reload()
     }
 
-    private func replaceInMemory(id: UUID, _ f: (inout ClipItem) -> Void) {
-        if let i = page.firstIndex(where: { $0.id == id }) { f(&page[i]); itemChanged.send(page[i]) }
-        if let i = bookmarks.firstIndex(where: { $0.id == id }) { f(&bookmarks[i]); itemChanged.send(bookmarks[i]) }
+    private func replaceInMemory(id: UUID, _ f: (inout ClipRow) -> Void) {
+        var changed = false
+        if let i = page.firstIndex(where: { $0.id == id }) { f(&page[i]); changed = true }
+        if let i = bookmarks.firstIndex(where: { $0.id == id }) { f(&bookmarks[i]); changed = true }
+        if changed { itemChanged.send(id) }
     }
 
     private func deleteImageFile(_ name: String?) {
@@ -303,18 +318,21 @@ final class HistoryStore: ObservableObject {
 
     // MARK: - Query helpers
 
-    func imageURL(for item: ClipItem) -> URL? {
-        item.imageFile.map { imagesDir.appendingPathComponent($0) }
+    func imageURL(file: String?) -> URL? {
+        file.map { imagesDir.appendingPathComponent($0) }
     }
+
+    func imageURL(for row: ClipRow) -> URL? { imageURL(file: row.imageFile) }
+    func imageURL(for item: ClipItem) -> URL? { imageURL(file: item.imageFile) }
 
     func loadImage(for item: ClipItem) -> NSImage? {
         imageURL(for: item).flatMap { NSImage(contentsOf: $0) }
     }
 
-    var pendingOCR: [ClipItem] { (try? db.pendingOCR()) ?? [] }
+    var pendingOCR: [ClipRow] { (try? db.pendingOCR()) ?? [] }
 
     /// 現在表示中の全カード（ブックマーク → 一覧）。プレビューの前後移動に使う
-    var visibleItems: [ClipItem] { isSearching ? page : bookmarks + page }
+    var visibleRows: [ClipRow] { isSearching ? page : bookmarks + page }
 
     // MARK: - Legacy import
 

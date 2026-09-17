@@ -16,7 +16,7 @@ final class ThumbnailCache {
     }()
     init() { cache.countLimit = 80 }
 
-    func thumbnail(for item: ClipItem, store: HistoryStore, maxWidth: CGFloat = 360) async -> NSImage? {
+    func thumbnail(for item: ClipRow, store: HistoryStore, maxWidth: CGFloat = 360) async -> NSImage? {
         let key = item.id.uuidString as NSString
         if let c = cache.object(forKey: key) { return c }
         guard let url = store.imageURL(for: item) else { return nil }
@@ -47,7 +47,7 @@ final class ThumbnailCache {
 
 /// 一覧カード用。本体 PNG を View.body で読まない。高さ予約で LazyVStack が全部測らないようにする
 private struct CardThumbnail: View {
-    let item: ClipItem
+    let item: ClipRow
     let store: HistoryStore
     @State private var image: NSImage?
 
@@ -78,7 +78,7 @@ private struct CardThumbnail: View {
 }
 
 struct ClipCardView: View {
-    let item: ClipItem
+    let item: ClipRow
     let store: HistoryStore
     let actions: ClipActions
     let flashing: Bool
@@ -147,7 +147,7 @@ struct ClipCardView: View {
     @ViewBuilder private var content: some View {
         switch item.kind {
         case .text:
-            Text(item.truncatedText())
+            Text(item.displayText)
                 .font(.system(size: 12))
                 .lineLimit(4)
                 .truncationMode(.tail)
@@ -155,7 +155,7 @@ struct ClipCardView: View {
         case .file:
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: "doc.on.doc").foregroundStyle(.secondary)
-                Text(item.truncatedText(300).split(separator: "\n").prefix(3).map { ($0 as NSString).lastPathComponent }.joined(separator: "\n"))
+                Text(item.textPreview.split(separator: "\n").prefix(3).map { ($0 as NSString).lastPathComponent }.joined(separator: "\n"))
                     .font(.system(size: 12)).lineLimit(3)
             }
         case .image:
@@ -166,7 +166,7 @@ struct ClipCardView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                         .padding(.top, 1)
-                    Text((item.ocrText ?? "").isEmpty ? "（文字なし）" : item.truncatedOCR())
+                    Text(item.hasNonEmptyOCR ? item.displayOCR() : "（文字なし）")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(4)
@@ -175,8 +175,8 @@ struct ClipCardView: View {
                 }
             } else {
                 CardThumbnail(item: item, store: store)
-                if let ocr = item.ocrText, !ocr.isEmpty {
-                    Text(item.truncatedOCR(120))
+                if item.hasNonEmptyOCR {
+                    Text(item.displayOCR(120))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -196,13 +196,13 @@ struct ClipCardView: View {
                 } else {
                     Text(item.preview)
                 }
-                if item.ocrText == nil && !item.imageDeleted {
+                if !item.hasOCR && !item.imageDeleted {
                     Label("OCR中", systemImage: "hourglass")
-                } else if !(item.ocrText ?? "").isEmpty {
+                } else if item.hasNonEmptyOCR {
                     Label("OCR済", systemImage: "text.viewfinder")
                 }
             } else if item.kind == .text {
-                Text("\(item.utf16Count)字")
+                Text("\(item.textLength)字")
             }
             Spacer()
         }
@@ -217,7 +217,7 @@ struct ClipCardView: View {
         if item.kind == .image {
             Divider()
             Button("OCR テキストをコピー") { actions.copyOCR(item) }
-                .disabled((item.ocrText ?? "").isEmpty)
+                .disabled(!item.hasNonEmptyOCR)
             Button("Finder で表示") { actions.revealInFinder(item) }
                 .disabled(item.imageFile == nil)
         }
@@ -225,12 +225,15 @@ struct ClipCardView: View {
         Button("削除", role: .destructive) { actions.delete(item) }
     }
 
+    /// ドラッグ開始時に 1 回だけ呼ばれる。一覧行は切り出しなので、本文は DB から全文を取る
     private func dragProvider() -> NSItemProvider {
         switch item.kind {
         case .text:
-            return NSItemProvider(object: (item.text ?? "") as NSString)
+            let full = store.item(id: item.id)?.text ?? item.textPreview
+            return NSItemProvider(object: full as NSString)
         case .file:
-            let urls = (item.text ?? "").split(separator: "\n").map { URL(fileURLWithPath: String($0)) }
+            let full = store.item(id: item.id)?.text ?? item.textPreview
+            let urls = full.split(separator: "\n").map { URL(fileURLWithPath: String($0)) }
             if let first = urls.first { return NSItemProvider(contentsOf: first) ?? NSItemProvider() }
             return NSItemProvider()
         case .image:
@@ -244,7 +247,9 @@ struct ClipCardView: View {
                 }
             }
             if provider.registeredTypeIdentifiers.isEmpty {
-                if let t = item.ocrText, !t.isEmpty { return NSItemProvider(object: t as NSString) }
+                if item.hasNonEmptyOCR, let t = store.item(id: item.id)?.ocrText, !t.isEmpty {
+                    return NSItemProvider(object: t as NSString)
+                }
                 return NSItemProvider()
             }
             return provider
