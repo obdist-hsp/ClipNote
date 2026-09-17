@@ -287,11 +287,11 @@ struct HistoryTableView: NSViewRepresentable {
             withoutAnimation { noteImageRowHeights(table) }
         }
 
-        /// 幅で高さが変わるのは画像カードだけ（テキスト・ファイル・セクションは定数）
+        /// 幅で高さが変わる行（画像の縦横比、折り返すテキスト／ファイル／OCR）
         private func noteImageRowHeights(_ table: NSTableView) {
             var idx = IndexSet()
             for (i, r) in rows.enumerated() {
-                if case .item(let row) = r, row.kind == .image, row.imageFile != nil, !row.imageDeleted { idx.insert(i) }
+                if case .item(let item) = r, HistoryRow.heightDependsOnWidth(item) { idx.insert(i) }
             }
             if !idx.isEmpty { table.noteHeightOfRows(withIndexesChanged: idx) }
             needsFullHeightPass = false
@@ -394,24 +394,87 @@ private enum HistoryRow: Equatable {
         }
     }
 
+    /// パネル幅で高さが変わりうるか。短文の 1 行カードは幅が変わっても定数のまま。
+    static func heightDependsOnWidth(_ item: ClipRow) -> Bool {
+        switch item.kind {
+        case .image:
+            return true
+        case .text:
+            return mightWrap(item.displayText, font: bodyFont)
+        case .file:
+            return mightWrap(filePreview(item), font: bodyFont)
+        }
+    }
+
     static func itemHeight(_ item: ClipRow, width: CGFloat) -> CGFloat {
-        let vPad: CGFloat = 20
+        // ClipCardView: .padding(8) + VStack spacing 6 + 9pt フッター。
+        // 本文は実線数だけ確保する。常に 4 行分だと 1 行カードの下に大きな空きが出る。
+        let vPad: CGFloat = 16
         let footer: CGFloat = 16
         let gap: CGFloat = 6
+        let fudge: CGFloat = 2
         let inner = max(80, width - 28 - (item.isBookmarked ? 20 : 0))
+        let chrome = vPad + gap + footer + fudge
         switch item.kind {
-        case .text: return vPad + gap + footer + 64
-        case .file: return vPad + gap + footer + 48
+        case .text:
+            return chrome + wrappedHeight(item.displayText, width: inner, font: bodyFont, line: 16, maxLines: 4)
+        case .file:
+            return chrome + wrappedHeight(filePreview(item), width: inner, font: bodyFont, line: 16, maxLines: 3)
         case .image:
-            if item.imageDeleted || item.imageFile == nil { return vPad + gap + footer + 56 }
+            if item.imageDeleted || item.imageFile == nil {
+                let ocr = item.hasNonEmptyOCR ? item.displayOCR() : "（文字なし）"
+                return chrome + wrappedHeight(ocr, width: inner, font: ocrFont, line: 14, maxLines: 4)
+            }
             let maxH: CGFloat = 180
             var imgH: CGFloat = 80
             if let w = item.imageWidth, let h = item.imageHeight, w > 0 {
                 imgH = min(maxH, max(48, inner * CGFloat(h) / CGFloat(w)))
             }
-            let ocr: CGFloat = item.hasNonEmptyOCR ? 22 : 0
-            return vPad + gap + footer + imgH + (ocr > 0 ? gap + ocr : 0)
+            guard item.hasNonEmptyOCR else { return chrome + imgH }
+            let ocrH = wrappedHeight(item.displayOCR(120), width: inner, font: ocrThumbFont, line: 13, maxLines: 2)
+            return chrome + imgH + gap + ocrH
         }
+    }
+
+    private static let bodyFont = NSFont.systemFont(ofSize: 12)
+    private static let ocrFont = NSFont.systemFont(ofSize: 11)
+    private static let ocrThumbFont = NSFont.systemFont(ofSize: 10)
+    /// これより細い列では折り返しうる、という下限（rowWidth の下限 160 − 余白）
+    private static let minInner: CGFloat = 80
+
+    private static func filePreview(_ item: ClipRow) -> String {
+        item.textPreview.split(separator: "\n").prefix(3)
+            .map { ($0 as NSString).lastPathComponent }
+            .joined(separator: "\n")
+    }
+
+    private static func mightWrap(_ text: String, font: NSFont) -> Bool {
+        if text.isEmpty { return false }
+        let ns = text as NSString
+        if ns.rangeOfCharacter(from: .newlines).location != NSNotFound { return true }
+        let w = ns.size(withAttributes: [.font: font]).width
+        return w > minInner
+    }
+
+    /// AppKit で折り返し線数を数え、SwiftUI Text の lineLimit に合わせた高さを返す。
+    /// 短文は size(withAttributes:) だけで済ませ、10000 行でもメインスレッドを止めない。
+    private static func wrappedHeight(_ text: String, width: CGFloat, font: NSFont, line: CGFloat, maxLines: Int) -> CGFloat {
+        let maxH = line * CGFloat(maxLines)
+        guard !text.isEmpty else { return line }
+        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        let ns = text as NSString
+        let inner = max(1, width)
+        if ns.rangeOfCharacter(from: .newlines).location == NSNotFound,
+           ns.size(withAttributes: attrs).width <= inner {
+            return line
+        }
+        let rect = ns.boundingRect(
+            with: NSSize(width: inner, height: maxH),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attrs
+        )
+        let lines = min(maxLines, max(1, Int(ceil(rect.height / max(1, line) - 0.05))))
+        return CGFloat(lines) * line
     }
 }
 

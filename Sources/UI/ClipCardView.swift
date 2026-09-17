@@ -123,6 +123,7 @@ struct ClipCardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .fill(flashing ? Color.accentColor.opacity(0.35)
