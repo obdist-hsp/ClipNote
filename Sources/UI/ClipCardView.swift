@@ -2,7 +2,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 import ImageIO
 
-/// 画像サムネイルのキャッシュ（縮小済み）。デコードはメインスレッドに載せない
+/// 画像サムネイルのキャッシュ（縮小済み）。デコードはメインスレッドに載せない。
+/// 上限は件数ではなくバイト数で持ち、画面外に流れたセルのデコードは始める前に打ち切る
 @MainActor
 final class ThumbnailCache {
     static let shared = ThumbnailCache()
@@ -14,23 +15,36 @@ final class ThumbnailCache {
         q.qualityOfService = .userInitiated
         return q
     }()
-    init() { cache.countLimit = 80 }
+    init() {
+        cache.countLimit = 400
+        cache.totalCostLimit = 64 * 1024 * 1024
+    }
 
     func thumbnail(for item: ClipRow, store: HistoryStore, maxWidth: CGFloat = 360) async -> NSImage? {
         let key = item.id.uuidString as NSString
         if let c = cache.object(forKey: key) { return c }
-        guard let url = store.imageURL(for: item) else { return nil }
+        guard let url = store.imageURL(for: item), !Task.isCancelled else { return nil }
         let maxPixel = Int(maxWidth)
-        let thumb: NSImage? = await withCheckedContinuation { continuation in
-            Self.decodeQueue.addOperation {
-                continuation.resume(returning: Self.makeThumbnail(url: url, maxPixel: maxPixel))
+        // SwiftUI の .task(id:) がキャンセルされたら（セルが別の行に使い回された）、
+        // まだ始まっていないデコードは飛ばす。Operation.cancel() だと continuation が resume されずに漏れるので、
+        // フラグを見てブロック側で必ず 1 回 resume する
+        let cancel = CancelFlag()
+        let result: (image: NSImage, cost: Int)? = await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<(image: NSImage, cost: Int)?, Never>) in
+                Self.decodeQueue.addOperation {
+                    guard !cancel.isCancelled else { continuation.resume(returning: nil); return }
+                    continuation.resume(returning: Self.makeThumbnail(url: url, maxPixel: maxPixel))
+                }
             }
+        } onCancel: {
+            cancel.cancel()
         }
-        if let thumb { cache.setObject(thumb, forKey: key) }
-        return thumb
+        guard let result else { return nil }
+        cache.setObject(result.image, forKey: key, cost: result.cost)
+        return result.image
     }
 
-    nonisolated private static func makeThumbnail(url: URL, maxPixel: Int) -> NSImage? {
+    nonisolated private static func makeThumbnail(url: URL, maxPixel: Int) -> (image: NSImage, cost: Int)? {
         guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
         let opts: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -39,10 +53,19 @@ final class ThumbnailCache {
             kCGImageSourceShouldCacheImmediately: false,
         ]
         guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
-        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        let image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        return (image, cg.bytesPerRow * cg.height)
     }
 
     func remove(_ id: UUID) { cache.removeObject(forKey: id.uuidString as NSString) }
+}
+
+/// デコードキューとキャンセルハンドラの両方から触るフラグ
+private final class CancelFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flagged = false
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return flagged }
+    func cancel() { lock.lock(); flagged = true; lock.unlock() }
 }
 
 /// 一覧カード用。本体 PNG を View.body で読まない。高さ予約で LazyVStack が全部測らないようにする
