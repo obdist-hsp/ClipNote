@@ -18,10 +18,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panelMenuItem: NSMenuItem!
     private var loginMenuItem: NSMenuItem!
     private var captureHotKeyMenuItem: NSMenuItem!
+    private var keepOnTopMenuItem: NSMenuItem!
 
     private static let captureHotKeyKey = "captureHotKeyEnabled"
     private var captureHotKeyEnabled: Bool {
         UserDefaults.standard.bool(forKey: Self.captureHotKeyKey)
+    }
+
+    private static let keepOnTopKey = "panelKeepOnTop"
+    /// 未設定なら ON（画面先頭に固定）
+    private var keepOnTopEnabled: Bool {
+        if UserDefaults.standard.object(forKey: Self.keepOnTopKey) == nil { return true }
+        return UserDefaults.standard.bool(forKey: Self.keepOnTopKey)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -47,11 +55,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.watcher.ignoreCurrentChange()
             },
             capture: { [weak self] in self?.startCapture() },
-            hidePanel: { [weak self] in self?.hidePanel() },
             preview: { [weak self] in self?.preview.show($0) }
         )
         preview = PreviewController(store: store, actions: actions)
         panel = StickyPanel(content: HistoryListView(store: store, actions: actions))
+        panel.setKeepOnTop(keepOnTopEnabled)
         panel.ensureOnScreen()
         panel.orderFrontRegardless()
         // ディスプレイ構成が変わったら画面内に戻す
@@ -110,6 +118,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         panelMenuItem = NSMenuItem(title: "パネルを隠す", action: #selector(togglePanel), keyEquivalent: "")
         menu.addItem(panelMenuItem)
+        keepOnTopMenuItem = NSMenuItem(title: "画面先頭に固定", action: #selector(toggleKeepOnTop), keyEquivalent: "")
+        keepOnTopMenuItem.state = keepOnTopEnabled ? .on : .off
+        menu.addItem(keepOnTopMenuItem)
         menu.addItem(NSMenuItem(title: "範囲キャプチャ", action: #selector(captureAction), keyEquivalent: ""))
         captureHotKeyMenuItem = NSMenuItem(title: "⌘⇧2 ショートカット", action: #selector(toggleCaptureHotKey), keyEquivalent: "")
         captureHotKeyMenuItem.state = captureHotKeyEnabled ? .on : .off
@@ -141,6 +152,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func hidePanel() {
         panel.orderOut(nil)
         panelMenuItem.title = "パネルを表示"
+    }
+
+    @objc private func toggleKeepOnTop() {
+        let next = !keepOnTopEnabled
+        UserDefaults.standard.set(next, forKey: Self.keepOnTopKey)
+        keepOnTopMenuItem.state = next ? .on : .off
+        panel.setKeepOnTop(next)
+        if next, panel.isVisible { panel.orderFrontRegardless() }
     }
 
     @objc private func captureAction() { startCapture() }

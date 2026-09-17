@@ -9,7 +9,6 @@ struct ClipActions {
     var revealInFinder: (ClipItem) -> Void
     var copyOCR: (ClipItem) -> Void
     var capture: () -> Void
-    var hidePanel: () -> Void
     var preview: (ClipItem) -> Void
 }
 
@@ -46,16 +45,6 @@ struct HistoryListView: View {
                 WindowDragRegion()
                     .frame(maxWidth: .infinity)
                     .help("ドラッグでパネルを移動")
-                Button(action: actions.hidePanel) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 22, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("パネルを非表示")
-                .padding(.trailing, 8)
             }
             .frame(height: 26)
             VStack(alignment: .leading, spacing: 2) {
