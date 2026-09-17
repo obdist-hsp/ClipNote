@@ -9,6 +9,7 @@ struct ClipActions {
     var revealInFinder: (ClipItem) -> Void
     var copyOCR: (ClipItem) -> Void
     var capture: () -> Void
+    var hidePanel: () -> Void
     var preview: (ClipItem) -> Void
 }
 
@@ -45,6 +46,16 @@ struct HistoryListView: View {
                 WindowDragRegion()
                     .frame(maxWidth: .infinity)
                     .help("ドラッグでパネルを移動")
+                Button(action: actions.hidePanel) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("パネルを非表示")
+                .padding(.trailing, 8)
             }
             .frame(height: 26)
             VStack(alignment: .leading, spacing: 2) {
@@ -58,7 +69,7 @@ struct HistoryListView: View {
                     }
                     Button(action: actions.capture) { Image(systemName: "scissors") }
                         .buttonStyle(.plain)
-                        .help("範囲キャプチャ（⌘⇧2）")
+                        .help("範囲キャプチャ")
                 }
                 if !queryText.isEmpty && queryText.trimmingCharacters(in: .whitespaces).count < HistoryStore.minQueryLength {
                     Text("3 文字以上で検索します")
@@ -156,7 +167,7 @@ struct HistoryListView: View {
                     Spacer()
                     Image(systemName: store.isSearching ? "magnifyingglass" : "note.text")
                         .font(.system(size: 28)).foregroundStyle(.tertiary)
-                    Text(store.isSearching ? "一致する項目がありません" : "コピーや ⌘⇧2 のキャプチャがここに並びます")
+                    Text(store.isSearching ? "一致する項目がありません" : "コピーした内容がここに並びます")
                         .font(.caption).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                     Spacer()
