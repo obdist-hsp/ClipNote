@@ -252,7 +252,48 @@ final class HistoryStore: ObservableObject {
         bookmarks.insert(it, at: index)
     }
 
+    /// 既存 order の最長増加部分列は据え置き、それ以外の行だけ隣同士の中間値を割り当てて保存する
+    /// （1 回のドラッグ → 通常 1 行 UPDATE）。中間値を取り続けて間隔が詰まったら 1..n で振り直す
     func commitBookmarkOrder() {
+        let keep = Self.longestIncreasingSubsequence(bookmarks.map(\.bookmarkOrder))
+        var pairs: [(UUID, Double)] = []
+        var prev = 0.0
+        for i in bookmarks.indices {
+            if keep.contains(i), let o = bookmarks[i].bookmarkOrder { prev = o; continue }
+            var next = prev + 2
+            for j in (i + 1)..<bookmarks.count where keep.contains(j) {
+                if let o = bookmarks[j].bookmarkOrder { next = o; break }
+            }
+            guard next - prev >= 1e-6 else { renumberBookmarks(); return }
+            let o = (prev + next) / 2
+            bookmarks[i].bookmarkOrder = o
+            pairs.append((bookmarks[i].id, o))
+            prev = o
+        }
+        if !pairs.isEmpty { try? db.setBookmarkOrders(pairs) }
+    }
+
+    /// nil を除き厳密に増加する最長部分列のインデックス（patience sorting, O(n log n)）
+    private static func longestIncreasingSubsequence(_ values: [Double?]) -> Set<Int> {
+        var tails: [Int] = []                                    // tails[k] = 長さ k+1 の増加列の末尾インデックス
+        var prevIndex = [Int](repeating: -1, count: values.count)
+        for (i, value) in values.enumerated() {
+            guard let v = value else { continue }
+            var lo = 0, hi = tails.count
+            while lo < hi {
+                let mid = (lo + hi) / 2
+                if let t = values[tails[mid]], t < v { lo = mid + 1 } else { hi = mid }
+            }
+            if lo > 0 { prevIndex[i] = tails[lo - 1] }
+            if lo == tails.count { tails.append(i) } else { tails[lo] = i }
+        }
+        var out = Set<Int>()
+        var cur = tails.last ?? -1
+        while cur >= 0 { out.insert(cur); cur = prevIndex[cur] }
+        return out
+    }
+
+    private func renumberBookmarks() {
         var pairs: [(UUID, Double)] = []
         for (i, b) in bookmarks.enumerated() {
             let o = Double(i + 1)
