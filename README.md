@@ -6,8 +6,8 @@
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black.svg)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-swiftc-F05138.svg)](https://www.swift.org/)
 
-Clipboard history + region capture, shown as always-on sticky notes in the macOS menu bar.
-macOS 14+ 向けのメニューバーアプリ。クリップボード履歴と範囲キャプチャを「付箋」として常時表示します。  
+Clipboard history + region capture, shown as always-on sticky notes in the macOS menu bar.  
+デフォルト環境macOS向けのメニューバーアプリ。スタンドアロンのクリップボード管理とOCR検索による超簡易個人ナレッジベース。
 **いまはベータ版（v0.2.0）です。** Xcode 不要、`swiftc` だけでビルドでき、**外部通信ゼロを OS レベルで担保**しています。
 
 ## TARGET
@@ -19,7 +19,7 @@ macOS 14+ 向けのメニューバーアプリ。クリップボード履歴と�
 - クリップボード監視によりtext, image, file(path)　を瞬時にボードに変換
 - クリップボード監視を停止し、メニューまたはパネルのハサミボタンで範囲キャプチャすることが可能。　⌘⇧2 は初期 OFF
 - 最前面表示機能（切り替え可）
-- ブックマーク機能でTOPに好きなボードを固定することができます（TODO, memo用途を想定）
+- ブックマーク機能でTOPに好きなボードを固定可（TODO, memo用途を想定）
 - App Sandbox 有効・ネットワーク権限なし。依存ライブラリはゼロ（Apple 標準フレームワーク + libsqlite3 のみ）
 - 画像はオンデバイス Vision で OCR され、SQLite FTS5 で全文検索
 - テキストは明示削除しない限り永続。画像は合計 100 GB 超で古いものから本体だけ削除（ブックマークは対象外）
@@ -42,11 +42,11 @@ cd ClipNote
 ## 使い方
 インストール後、クリップボード監視は有効状態です。
 text      : cmd + c
-image     : ctrl + shift + cmd + 4
+image     : ctrl + shift + cmd + 4　※MacOS標準のショートカット
 file(path): cmd + c
 
 ## 画面収録許可について
-ad-hoc 署名のためビルドし直すと署名が変わり、許可をもう一度求められます（それ以外では聞かれません）。
+ad-hoc 署名のためビルドし直すと署名が変わり、許可をもう一度求められます。
 ※クリップボード監視のみ利用の場合は許可は不要です。
 
 ## 操作
