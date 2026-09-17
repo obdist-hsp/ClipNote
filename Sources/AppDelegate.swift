@@ -19,6 +19,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var loginMenuItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let icon = NSImage(named: "AppIcon") {
+            NSApp.applicationIconImage = icon
+        }
         store = HistoryStore()
         watcher = PasteboardWatcher(store: store)
         ocr = OCRQueue(store: store)
@@ -82,11 +85,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panelMenuItem.title = "パネルを隠す"
     }
 
+    private static func menuBarImage(paused: Bool) -> NSImage? {
+        if let named = NSImage(named: "MenuBarIcon") {
+            named.isTemplate = true
+            named.size = NSSize(width: 18, height: 18)
+            named.accessibilityDescription = "ClipNote"
+            return named
+        }
+        let symbol = paused ? "note.text.badge.plus" : "note.text"
+        return NSImage(systemSymbolName: symbol, accessibilityDescription: "ClipNote")
+    }
+
     // MARK: - Status item
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "note.text", accessibilityDescription: "ClipNote")
+        statusItem.button?.image = Self.menuBarImage(paused: false)
 
         let menu = NSMenu()
         panelMenuItem = NSMenuItem(title: "パネルを隠す", action: #selector(togglePanel), keyEquivalent: "")
@@ -97,7 +111,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pauseMenuItem = NSMenuItem(title: "クリップボード監視を一時停止", action: #selector(togglePause), keyEquivalent: "")
         menu.addItem(pauseMenuItem)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "旧履歴 (.clip_history.json) を読み込む…", action: #selector(importLegacy), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "保存フォルダを Finder で開く", action: #selector(openDataFolder), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "ブックマーク以外を全消去…", action: #selector(clearAll), keyEquivalent: ""))
         menu.addItem(.separator())
@@ -125,28 +138,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func togglePause() {
         watcher.setPaused(!watcher.paused)
         pauseMenuItem.title = watcher.paused ? "クリップボード監視を再開" : "クリップボード監視を一時停止"
-        statusItem.button?.image = NSImage(systemSymbolName: watcher.paused ? "note.text.badge.plus" : "note.text",
-                                           accessibilityDescription: "ClipNote")
+        statusItem.button?.image = Self.menuBarImage(paused: watcher.paused)
         statusItem.button?.appearsDisabled = watcher.paused
-    }
-
-    @objc private func importLegacy() {
-        let p = NSOpenPanel()
-        p.title = "旧 clip_logger の履歴ファイルを選択"
-        p.message = "~/.clip_history.json を選んでください（⌘⇧. で隠しファイルを表示）"
-        p.allowedContentTypes = [.json]
-        p.canChooseDirectories = false
-        p.allowsMultipleSelection = false
-        p.showsHiddenFiles = true
-        p.directoryURL = FileManager.default.homeDirectoryForCurrentUser
-        NSApp.activate(ignoringOtherApps: true)
-        guard p.runModal() == .OK, let url = p.url else { return }
-        do {
-            let n = try store.importLegacy(from: url)
-            notify("旧履歴を取り込みました", "\(n) 件を追加（重複は除外）")
-        } catch {
-            notify("読み込みに失敗", error.localizedDescription)
-        }
     }
 
     @objc private func openDataFolder() {

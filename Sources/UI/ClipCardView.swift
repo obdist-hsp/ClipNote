@@ -193,9 +193,23 @@ struct ClipCardView: View {
             if let first = urls.first { return NSItemProvider(contentsOf: first) ?? NSItemProvider() }
             return NSItemProvider()
         case .image:
-            if let url = store.imageURL(for: item), let p = NSItemProvider(contentsOf: url) { return p }
-            if let t = item.ocrText, !t.isEmpty { return NSItemProvider(object: t as NSString) }
-            return NSItemProvider()
+            let provider = NSItemProvider()
+            if let url = store.imageURL(for: item) {
+                provider.suggestedName = url.lastPathComponent
+                provider.registerFileRepresentation(forTypeIdentifier: UTType.png.identifier,
+                                                    fileOptions: [], visibility: .all) { completion in
+                    completion(url, false, nil)
+                    return nil
+                }
+            }
+            if let img = store.loadImage(for: item) {
+                provider.registerObject(img, visibility: .all)
+            }
+            if provider.registeredTypeIdentifiers.isEmpty {
+                if let t = item.ocrText, !t.isEmpty { return NSItemProvider(object: t as NSString) }
+                return NSItemProvider()
+            }
+            return provider
         }
     }
 

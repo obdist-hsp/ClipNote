@@ -39,28 +39,37 @@ struct HistoryListView: View {
     // MARK: header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("検索（本文と OCR 結果、3 文字以上）", text: $queryText)
-                    .textFieldStyle(.plain)
-                if !queryText.isEmpty {
-                    Button { queryText = "" } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
+                Color.clear.frame(width: 72) // 信号ボタンと重ならないように空ける
+                WindowDragRegion()
+                    .frame(maxWidth: .infinity)
+                    .help("ドラッグでパネルを移動")
+            }
+            .frame(height: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("検索（本文と OCR 結果、3 文字以上）", text: $queryText)
+                        .textFieldStyle(.plain)
+                    if !queryText.isEmpty {
+                        Button { queryText = "" } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain).foregroundStyle(.secondary)
+                    }
+                    Button(action: actions.capture) { Image(systemName: "scissors") }
+                        .buttonStyle(.plain)
+                        .help("範囲キャプチャ（⌘⇧2）")
                 }
-                Button(action: actions.capture) { Image(systemName: "scissors") }
-                    .buttonStyle(.plain)
-                    .help("範囲キャプチャ（⌘⇧2）")
+                if !queryText.isEmpty && queryText.trimmingCharacters(in: .whitespaces).count < HistoryStore.minQueryLength {
+                    Text("3 文字以上で検索します")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                        .padding(.leading, 20)
+                }
             }
-            if !queryText.isEmpty && queryText.trimmingCharacters(in: .whitespaces).count < HistoryStore.minQueryLength {
-                Text("3 文字以上で検索します")
-                    .font(.caption2).foregroundStyle(.tertiary)
-                    .padding(.leading, 20)
-            }
+            .padding(.horizontal, 10)
+            .padding(.top, 2)
+            .padding(.bottom, 8)
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 26)   // タイトルバー(透明)ぶん
-        .padding(.bottom, 8)
     }
 
     // MARK: list
@@ -116,36 +125,46 @@ struct HistoryListView: View {
     // MARK: footer / empty
 
     private var footer: some View {
-        HStack(spacing: 8) {
-            if store.isSearching {
-                Text("\(store.matchCount ?? 0) 件ヒット")
-                if store.hasMore { Text("・\(store.page.count) 件表示中") }
-            } else {
-                Text("全 \(store.totalCount) 件")
-                if !store.bookmarks.isEmpty { Text("・ブックマーク \(store.bookmarks.count)") }
+        WindowDragRegion()
+            .frame(height: 22)
+            .overlay {
+                HStack(spacing: 8) {
+                    if store.isSearching {
+                        Text("\(store.matchCount ?? 0) 件ヒット")
+                        if store.hasMore { Text("・\(store.page.count) 件表示中") }
+                    } else {
+                        Text("全 \(store.totalCount) 件")
+                        if !store.bookmarks.isEmpty { Text("・ブックマーク \(store.bookmarks.count)") }
+                    }
+                    Spacer()
+                    Text("画像 \(Self.bytes(store.totalImageBytes))")
+                }
+                .font(.system(size: 9).monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .allowsHitTesting(false)
             }
-            Spacer()
-            Text("画像 \(Self.bytes(store.totalImageBytes))")
-                .help("上限 \(Self.bytes(HistoryStore.imageCapacityBytes))。超えると古い画像から削除（テキストは残る）")
-        }
-        .font(.system(size: 9).monospacedDigit())
-        .foregroundStyle(.tertiary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
+            .help("ドラッグでパネルを移動。画像は上限 \(Self.bytes(HistoryStore.imageCapacityBytes)) を超えると古いものから削除（テキストは残る）")
     }
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
-            Spacer()
-            Image(systemName: store.isSearching ? "magnifyingglass" : "note.text")
-                .font(.system(size: 28)).foregroundStyle(.tertiary)
-            Text(store.isSearching ? "一致する項目がありません" : "コピーや ⌘⇧2 のキャプチャがここに並びます")
-                .font(.caption).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
-        .padding()
+        WindowDragRegion()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                VStack(spacing: 8) {
+                    Spacer()
+                    Image(systemName: store.isSearching ? "magnifyingglass" : "note.text")
+                        .font(.system(size: 28)).foregroundStyle(.tertiary)
+                    Text(store.isSearching ? "一致する項目がありません" : "コピーや ⌘⇧2 のキャプチャがここに並びます")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Spacer()
+                }
+                .padding()
+                .allowsHitTesting(false)
+            }
+            .help("ドラッグでパネルを移動")
     }
 
     private func flash(_ item: ClipItem) {
