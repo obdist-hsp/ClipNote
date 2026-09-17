@@ -75,51 +75,9 @@ struct HistoryListView: View {
     // MARK: list
 
     private var list: some View {
-        ScrollView {
-            LazyVStack(spacing: 8, pinnedViews: []) {
-                if !store.isSearching && !store.bookmarks.isEmpty {
-                    sectionLabel("ブックマーク", systemImage: "bookmark.fill")
-                    ForEach(store.bookmarks) { item in
-                        card(item)
-                            .onDrop(of: [UTType.plainText], delegate: BookmarkDropDelegate(
-                                target: item, store: store, dragging: $draggingBookmarkID))
-                    }
-                    if !store.page.isEmpty {
-                        sectionLabel("履歴", systemImage: "clock").padding(.top, 6)
-                    }
-                }
-                ForEach(store.page) { item in
-                    card(item)
-                        .onAppear { store.loadMoreIfNeeded(current: item) }
-                }
-                if store.hasMore {
-                    ProgressView().controlSize(.small).padding(8)
-                        .onAppear { store.loadMore() }
-                }
-            }
-            .padding(10)
-        }
-    }
-
-    private func card(_ item: ClipItem) -> some View {
-        ClipCardView(item: item, store: store, actions: actions,
-                     flashing: flashID == item.id,
-                     onCopied: { flash(item) },
-                     onGripDrag: item.isBookmarked ? {
-                        draggingBookmarkID = item.id
-                        return NSItemProvider(object: item.id.uuidString as NSString)
-                     } : nil)
-    }
-
-    private func sectionLabel(_ title: String, systemImage: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: systemImage)
-            Text(title)
-            Spacer()
-        }
-        .font(.caption2.weight(.semibold))
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 2)
+        HistoryTableView(store: store, actions: actions, flashID: flashID,
+                         draggingBookmarkID: $draggingBookmarkID, onCopied: { flash($0) })
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: footer / empty

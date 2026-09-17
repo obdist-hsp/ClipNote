@@ -22,6 +22,8 @@ final class HistoryStore: ObservableObject {
     @Published private(set) var totalImageBytes = 0
     @Published private(set) var query = ""
     var isSearching: Bool { query.count >= Self.minQueryLength }
+    /// SwiftUI の onAppear が同一ターンで再入して全件を一気に読むのを防ぐ
+    private var loadingMore = false
 
     let baseDir: URL
     let imagesDir: URL
@@ -49,6 +51,7 @@ final class HistoryStore: ObservableObject {
     // MARK: - Loading
 
     func reload() {
+        loadingMore = false
         bookmarks = (try? db.bookmarks()) ?? []
         totalCount = (try? db.totalCount()) ?? 0
         totalImageBytes = (try? db.totalImageBytes()) ?? 0
@@ -59,7 +62,16 @@ final class HistoryStore: ObservableObject {
     }
 
     func loadMore() {
-        guard hasMore else { return }
+        guard hasMore, !loadingMore else { return }
+        loadingMore = true
+        fetchNextPage()
+        // テーブルのセル生成から同期で呼ばれても、次の表示更新まで再入しない
+        Task { @MainActor in
+            self.loadingMore = false
+        }
+    }
+
+    private func fetchNextPage() {
         let last = page.last.map { ($0.createdAt, $0.rowid) }
         let next: [ClipItem]
         if isSearching {

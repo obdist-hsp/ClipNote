@@ -12,13 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKey?
     private var panel: StickyPanel!
     private var preview: PreviewController!
-    private var statusItem: NSStatusItem!
-
-    private var pauseMenuItem: NSMenuItem!
-    private var panelMenuItem: NSMenuItem!
-    private var loginMenuItem: NSMenuItem!
-    private var captureHotKeyMenuItem: NSMenuItem!
-    private var keepOnTopMenuItem: NSMenuItem!
+    private var menuBar: MenuBarBridge!
 
     private static let captureHotKeyKey = "captureHotKeyEnabled"
     private var captureHotKeyEnabled: Bool {
@@ -62,18 +56,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.setKeepOnTop(keepOnTopEnabled)
         panel.ensureOnScreen()
         panel.orderFrontRegardless()
-        // ディスプレイ構成が変わったら画面内に戻す
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.panel.ensureOnScreen() }
         }
 
-        setupStatusItem()
         watcher.start()
         applyCaptureHotKey()
-        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: panel, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.panelMenuItem.title = "パネルを表示" }
-        }
-        // install.sh から `--enable-login-item` 付きで起動されたらログイン項目に登録する
+
         if CommandLine.arguments.contains("--enable-login-item") {
             do {
                 try SMAppService.mainApp.register()
@@ -81,10 +70,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch {
                 NSLog("ClipNote login item registration failed: \(error)")
             }
-            loginMenuItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        }
+
+        menuBar = MenuBarBridge(baseDir: store.baseDir, snapshot: { [weak self] in
+            guard let self else {
+                return .init(panelVisible: false, keepOnTop: true, captureHotKey: false, paused: false, loginEnabled: false)
+            }
+            return .init(
+                panelVisible: self.panel.isVisible,
+                keepOnTop: self.keepOnTopEnabled,
+                captureHotKey: self.captureHotKeyEnabled,
+                paused: self.watcher.paused,
+                loginEnabled: SMAppService.mainApp.status == .enabled
+            )
+        }, handler: { [weak self] command in
+            self?.handleMenuCommand(command)
+        })
+        menuBar.start()
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: panel, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.menuBar.publish() }
         }
     }
-
 
     /// Finder / Launchpad でアプリを再度開いたとき（既に起動中）: パネルを見える位置に出す
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -92,82 +98,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
+    private func handleMenuCommand(_ command: MenuCommand) {
+        switch command {
+        case .togglePanel:
+            if panel.isVisible { hidePanel() } else { showPanel() }
+        case .toggleKeepOnTop:
+            toggleKeepOnTop()
+        case .capture:
+            startCapture()
+        case .toggleCaptureHotKey:
+            toggleCaptureHotKey()
+        case .togglePause:
+            togglePause()
+        case .openDataFolder:
+            NSWorkspace.shared.activateFileViewerSelecting([store.baseDir])
+        case .clearAll:
+            clearAll()
+        case .toggleLogin:
+            toggleLogin()
+        case .about:
+            about()
+        case .quit:
+            NSApp.terminate(nil)
+        }
+    }
+
     private func showPanel() {
         panel.ensureOnScreen()
         panel.orderFrontRegardless()
-        panelMenuItem.title = "パネルを隠す"
-    }
-
-    private static func menuBarImage(paused: Bool) -> NSImage? {
-        if let named = NSImage(named: "MenuBarIcon") {
-            named.isTemplate = true
-            named.size = NSSize(width: 18, height: 18)
-            named.accessibilityDescription = "ClipNote"
-            return named
-        }
-        let symbol = paused ? "note.text.badge.plus" : "note.text"
-        return NSImage(systemSymbolName: symbol, accessibilityDescription: "ClipNote")
-    }
-
-    // MARK: - Status item
-
-    private func setupStatusItem() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = Self.menuBarImage(paused: false)
-
-        let menu = NSMenu()
-        panelMenuItem = NSMenuItem(title: "パネルを隠す", action: #selector(togglePanel), keyEquivalent: "")
-        menu.addItem(panelMenuItem)
-        keepOnTopMenuItem = NSMenuItem(title: "画面先頭に固定", action: #selector(toggleKeepOnTop), keyEquivalent: "")
-        keepOnTopMenuItem.state = keepOnTopEnabled ? .on : .off
-        menu.addItem(keepOnTopMenuItem)
-        menu.addItem(NSMenuItem(title: "範囲キャプチャ", action: #selector(captureAction), keyEquivalent: ""))
-        captureHotKeyMenuItem = NSMenuItem(title: "⌘⇧2 ショートカット", action: #selector(toggleCaptureHotKey), keyEquivalent: "")
-        captureHotKeyMenuItem.state = captureHotKeyEnabled ? .on : .off
-        menu.addItem(captureHotKeyMenuItem)
-        pauseMenuItem = NSMenuItem(title: "クリップボード監視を一時停止", action: #selector(togglePause), keyEquivalent: "")
-        menu.addItem(pauseMenuItem)
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "保存フォルダを Finder で開く", action: #selector(openDataFolder), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "ブックマーク以外を全消去…", action: #selector(clearAll), keyEquivalent: ""))
-        menu.addItem(.separator())
-        loginMenuItem = NSMenuItem(title: "ログイン時に起動", action: #selector(toggleLogin), keyEquivalent: "")
-        loginMenuItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        menu.addItem(loginMenuItem)
-        menu.addItem(NSMenuItem(title: "ClipNote について", action: #selector(about), keyEquivalent: ""))
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "終了", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
-        menu.items.forEach { $0.target = $0.action == #selector(NSApplication.terminate(_:)) ? nil : self }
-        statusItem.menu = menu
-    }
-
-    @objc private func togglePanel() {
-        if panel.isVisible {
-            hidePanel()
-        } else {
-            showPanel()
-        }
+        menuBar.publish()
     }
 
     private func hidePanel() {
         panel.orderOut(nil)
-        panelMenuItem.title = "パネルを表示"
+        menuBar.publish()
     }
 
-    @objc private func toggleKeepOnTop() {
+    private func toggleKeepOnTop() {
         let next = !keepOnTopEnabled
         UserDefaults.standard.set(next, forKey: Self.keepOnTopKey)
-        keepOnTopMenuItem.state = next ? .on : .off
         panel.setKeepOnTop(next)
         if next, panel.isVisible { panel.orderFrontRegardless() }
+        menuBar.publish()
     }
 
-    @objc private func captureAction() { startCapture() }
-
-    @objc private func toggleCaptureHotKey() {
+    private func toggleCaptureHotKey() {
         UserDefaults.standard.set(!captureHotKeyEnabled, forKey: Self.captureHotKeyKey)
-        captureHotKeyMenuItem.state = captureHotKeyEnabled ? .on : .off
         applyCaptureHotKey()
+        menuBar.publish()
     }
 
     private func applyCaptureHotKey() {
@@ -178,18 +156,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func togglePause() {
+    private func togglePause() {
         watcher.setPaused(!watcher.paused)
-        pauseMenuItem.title = watcher.paused ? "クリップボード監視を再開" : "クリップボード監視を一時停止"
-        statusItem.button?.image = Self.menuBarImage(paused: watcher.paused)
-        statusItem.button?.appearsDisabled = watcher.paused
+        menuBar.publish()
     }
 
-    @objc private func openDataFolder() {
-        NSWorkspace.shared.activateFileViewerSelecting([store.baseDir])
-    }
-
-    @objc private func clearAll() {
+    private func clearAll() {
         let a = NSAlert()
         a.messageText = "ブックマーク以外の履歴をすべて削除しますか？"
         a.informativeText = "画像ファイルも削除されます。この操作は取り消せません。"
@@ -202,7 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func toggleLogin() {
+    private func toggleLogin() {
         do {
             if SMAppService.mainApp.status == .enabled {
                 try SMAppService.mainApp.unregister()
@@ -212,13 +184,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             notify("ログイン項目の変更に失敗", "\(error.localizedDescription)\n(.app を /Applications に置くと安定します)")
         }
-        loginMenuItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        menuBar.publish()
     }
 
-    @objc private func about() {
+    private func about() {
         let a = NSAlert()
         a.messageText = "ClipNote"
         a.informativeText = """
+        ベータ版  v0.2.0
         クリップボード履歴 + 範囲キャプチャ付箋。
         App Sandbox 有効・ネットワーク権限なしで動作し、データは端末内にのみ保存されます。
 
@@ -231,13 +204,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         a.runModal()
     }
 
-    // MARK: - Actions
-
     private func startCapture() {
         capturer.beginSelection { [weak self] image in
             guard let self, let image else { return }
             self.store.addImage(image)
-            // クリップボードにも入れる（自分の変更は無視）
             let pb = NSPasteboard.general
             pb.clearContents()
             pb.writeObjects([image])
